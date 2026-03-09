@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Godot
+.godot/
+*.import
+export_presets.cfg
+
+# IDE
+.idea/
+.vscode/
+*.suo
+*.user
