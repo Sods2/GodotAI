@@ -1,0 +1,37 @@
+Copyright (c) 2024-2026 Sods2. All rights reserved.
+
+GODOTAI PLUGIN LICENSE
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, and modify the Software for personal or internal purposes, subject to
+the following conditions:
+
+1. PERMITTED USES
+   - Personal use in your own Godot projects
+   - Internal business use (non-commercial redistribution)
+   - Modification of the Software for personal or internal use
+
+2. RESTRICTIONS
+   - You may NOT redistribute, sell, sublicense, or otherwise transfer the
+     Software or modified versions of it as a standalone product or plugin.
+   - You may NOT create derivative works of the Software for commercial sale
+     or distribution without prior written permission from the copyright holder.
+   - You may NOT remove or alter this copyright notice or license text.
+
+3. GODOT PROJECTS
+   - Games or applications built using the Godot engine with this plugin
+     installed are NOT subject to the restrictions above. You may freely
+     distribute and sell projects that use this plugin.
+
+4. DISCLAIMER
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
+
+For commercial licensing inquiries, contact the author via the Godot Asset
+Library listing or the project's GitHub repository.
