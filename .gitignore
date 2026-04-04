@@ -13,3 +13,8 @@ export_presets.cfg
 .vscode/
 *.suo
 *.user
+
+# Claude Code (local only)
+CLAUDE.md
+.claude/
+.mcp.json
