@@ -11,6 +11,7 @@ const SECTION_GENERAL := "general"
 const SECTION_ANTHROPIC := "anthropic"
 const SECTION_OPENAI := "openai"
 const SECTION_OPENROUTER := "openrouter"
+const SECTION_LOCAL := "local"
 const SECTION_SHORTCUTS := "shortcuts"
 const SECTION_CUSTOM_MODELS := "custom_models"
 
@@ -46,6 +47,14 @@ var openrouter_model: String = "anthropic/claude-opus-4"
 var openrouter_temperature: float = 0.7
 var openrouter_max_tokens: int = 4096
 
+# Local (Ollama / LM Studio / llama.cpp / custom OpenAI-compatible server)
+var local_endpoint_url: String = "http://localhost:11434/v1"
+var local_api_key: String = ""
+var local_model: String = "llama3.2"
+var local_temperature: float = 0.7
+var local_max_tokens: int = 4096
+var local_server_preset: String = "ollama"
+
 ## Load settings from disk. Missing keys fall back to defaults, numeric values
 ## are clamped to valid ranges, and unknown provider names reset to "Anthropic".
 func load() -> void:
@@ -55,7 +64,7 @@ func load() -> void:
 		return
 
 	var loaded_provider: String = _config.get_value(SECTION_GENERAL, "active_provider", active_provider)
-	active_provider = loaded_provider if loaded_provider in ["anthropic", "openai", "openrouter"] else "anthropic"
+	active_provider = loaded_provider if loaded_provider in ["anthropic", "openai", "openrouter", "local"] else "anthropic"
 	font_size = clampi(int(_config.get_value(SECTION_GENERAL, "font_size", 28)), 10, 48)
 
 	anthropic_api_key = _config.get_value(SECTION_ANTHROPIC, "api_key", "")
@@ -73,12 +82,19 @@ func load() -> void:
 	openrouter_temperature = clampf(float(_config.get_value(SECTION_OPENROUTER, "temperature", openrouter_temperature)), 0.0, 2.0)
 	openrouter_max_tokens = clampi(int(_config.get_value(SECTION_OPENROUTER, "max_tokens", openrouter_max_tokens)), 1, 65536)
 
+	local_endpoint_url = _config.get_value(SECTION_LOCAL, "endpoint_url", local_endpoint_url)
+	local_api_key = _config.get_value(SECTION_LOCAL, "api_key", "")
+	local_model = _config.get_value(SECTION_LOCAL, "model", local_model)
+	local_temperature = clampf(float(_config.get_value(SECTION_LOCAL, "temperature", local_temperature)), 0.0, 2.0)
+	local_max_tokens = clampi(int(_config.get_value(SECTION_LOCAL, "max_tokens", local_max_tokens)), 1, 65536)
+	local_server_preset = _config.get_value(SECTION_LOCAL, "server_preset", local_server_preset)
+
 	shortcut_focus_chat = _config.get_value(SECTION_SHORTCUTS, "focus_chat", "Ctrl+/")
 	shortcut_send_code = _config.get_value(SECTION_SHORTCUTS, "send_code", "Ctrl+Shift+/")
 	shortcut_send_message = _config.get_value(SECTION_SHORTCUTS, "send_message", "Ctrl+Enter")
 
 	custom_models = {}
-	for key in ["anthropic", "openai", "openrouter"]:
+	for key in ["anthropic", "openai", "openrouter", "local"]:
 		var saved = _config.get_value(SECTION_CUSTOM_MODELS, key, [])
 		if saved is Array and not saved.is_empty():
 			custom_models[key] = saved
@@ -104,11 +120,18 @@ func save() -> void:
 	_config.set_value(SECTION_OPENROUTER, "temperature", openrouter_temperature)
 	_config.set_value(SECTION_OPENROUTER, "max_tokens", openrouter_max_tokens)
 
+	_config.set_value(SECTION_LOCAL, "endpoint_url", local_endpoint_url)
+	_config.set_value(SECTION_LOCAL, "api_key", local_api_key)
+	_config.set_value(SECTION_LOCAL, "model", local_model)
+	_config.set_value(SECTION_LOCAL, "temperature", local_temperature)
+	_config.set_value(SECTION_LOCAL, "max_tokens", local_max_tokens)
+	_config.set_value(SECTION_LOCAL, "server_preset", local_server_preset)
+
 	_config.set_value(SECTION_SHORTCUTS, "focus_chat", shortcut_focus_chat)
 	_config.set_value(SECTION_SHORTCUTS, "send_code", shortcut_send_code)
 	_config.set_value(SECTION_SHORTCUTS, "send_message", shortcut_send_message)
 
-	for key in ["anthropic", "openai", "openrouter"]:
+	for key in ["anthropic", "openai", "openrouter", "local"]:
 		if custom_models.has(key) and not custom_models[key].is_empty():
 			_config.set_value(SECTION_CUSTOM_MODELS, key, custom_models[key])
 		else:

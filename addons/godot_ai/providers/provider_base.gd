@@ -58,7 +58,7 @@ func send_message(messages: Array, system_prompt: String = "") -> void:
 	var headers := _build_headers()
 
 	_setup_stream()
-	_http_stream.send_request(get_api_host(), get_api_path(), headers, body_json)
+	_http_stream.send_request(get_api_host(), get_api_path(), headers, body_json, get_api_port(), get_api_use_ssl())
 
 ## Cancel an in-progress request.
 func cancel() -> void:
@@ -101,7 +101,11 @@ func fetch_models() -> void:
 	_models_http_request = HTTPRequest.new()
 	_parent_node.add_child(_models_http_request)
 	_models_http_request.request_completed.connect(_on_models_response)
-	var url := "https://" + get_api_host() + path
+	var scheme := "https" if get_api_use_ssl() else "http"
+	var port := get_api_port()
+	var default_port := 443 if get_api_use_ssl() else 80
+	var host_part := get_api_host() if port == default_port else "%s:%d" % [get_api_host(), port]
+	var url := "%s://%s%s" % [scheme, host_part, path]
 	_models_http_request.request(url, _build_headers(), HTTPClient.METHOD_GET)
 
 ## Clear the cached model list so the next fetch_models() hits the API.
@@ -140,6 +144,14 @@ func get_api_host() -> String:
 func get_api_path() -> String:
 	push_error("ProviderBase.get_api_path() not implemented")
 	return ""
+
+## Return the TCP port to connect on. Default 443 (HTTPS). Override for local servers.
+func get_api_port() -> int:
+	return 443
+
+## Return whether to use TLS. Default true. Override to false for local HTTP servers.
+func get_api_use_ssl() -> bool:
+	return true
 
 ## Build the JSON-serialisable request body dict for this provider.
 func _build_request_body(_messages: Array, _system_prompt: String) -> Dictionary:
@@ -225,7 +237,12 @@ func _on_models_response(result: int, response_code: int, _headers: PackedString
 		_models_http_request = null
 
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
-		models_fetch_failed.emit("HTTP error %d" % response_code)
+		var msg: String
+		if result != HTTPRequest.RESULT_SUCCESS:
+			msg = "Could not connect to server"
+		else:
+			msg = "Server returned HTTP %d" % response_code
+		models_fetch_failed.emit(msg)
 		models_fetched.emit(get_available_models())
 		return
 

@@ -3,7 +3,7 @@ class_name AISettingsDialog
 extends AcceptDialog
 
 ## Settings UI for GodotAI plugin.
-## Provider tabs: Anthropic, OpenAI, OpenRouter.
+## Provider tabs: Anthropic, OpenAI, OpenRouter, Local.
 ## Shows API key fields, model dropdowns, temperature sliders.
 
 signal settings_saved(settings: AISettings)
@@ -53,9 +53,37 @@ var _openrouter_temp_slider: HSlider
 var _openrouter_temp_label: Label
 var _openrouter_tokens_spin: SpinBox
 
+# Local tab
+var _local_endpoint_field: LineEdit
+var _local_key_field: LineEdit
+var _local_model_option: OptionButton
+var _local_refresh_btn: Button
+var _local_temp_slider: HSlider
+var _local_temp_label: Label
+var _local_tokens_spin: SpinBox
+var _local_status_label: Label
+var _local_preset_option: OptionButton
+var _proxy_control_row: HBoxContainer
+var _proxy_toggle_btn: Button
+var _proxy_status_label: Label
+
+var _start_proxy_callable: Callable
+var _stop_proxy_callable: Callable
+var _is_proxy_running_callable: Callable
+
+const LOCAL_PRESETS := {
+	"ollama": "http://localhost:11434/v1",
+	"lm_studio": "http://localhost:1234/v1",
+	"llamacpp": "http://localhost:8080/v1",
+	"claude_proxy": "http://localhost:8082/v1",
+	"custom": "",
+}
+const LOCAL_PRESET_LABELS: Array[String] = ["Ollama", "LM Studio", "llama.cpp", "Claude Proxy", "Custom"]
+const LOCAL_PRESET_KEYS: Array[String] = ["ollama", "lm_studio", "llamacpp", "claude_proxy", "custom"]
+
 func _ready() -> void:
 	title = "GodotAI Settings"
-	min_size = Vector2i(820, 720)
+	min_size = Vector2i(920, 720)
 	get_ok_button().text = "Save"
 	add_cancel_button("Cancel")
 	confirmed.connect(_on_save)
@@ -65,6 +93,13 @@ func _ready() -> void:
 ## Call once after creating the dialog to give it access to provider model lists.
 func setup_provider_manager(pm: ProviderManager) -> void:
 	_provider_manager = pm
+	_provider_manager.models_fetch_failed.connect(_on_models_fetch_failed)
+
+## Pass callables from plugin.gd to allow starting/stopping the built-in Claude proxy.
+func set_proxy_controls(start_fn: Callable, stop_fn: Callable, is_running_fn: Callable) -> void:
+	_start_proxy_callable = start_fn
+	_stop_proxy_callable = stop_fn
+	_is_proxy_running_callable = is_running_fn
 
 ## Populate the dialog from the given settings and show it.
 ## Also triggers model re-fetch if a provider has an API key but no cached models.
@@ -92,6 +127,7 @@ func _build_ui() -> void:
 	_provider_option.add_item("Anthropic (Claude)", 0)
 	_provider_option.add_item("OpenAI (ChatGPT)", 1)
 	_provider_option.add_item("OpenRouter", 2)
+	_provider_option.add_item("Local (Ollama / LM Studio)", 3)
 	_provider_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_provider_option.item_selected.connect(_on_provider_option_selected)
 	provider_row.add_child(_provider_option)
@@ -108,6 +144,7 @@ func _build_ui() -> void:
 	_tabs.add_child(_build_anthropic_tab())
 	_tabs.add_child(_build_openai_tab())
 	_tabs.add_child(_build_openrouter_tab())
+	_tabs.add_child(_build_local_tab())
 
 func _build_general_tab() -> Control:
 	var container := VBoxContainer.new()
@@ -214,6 +251,87 @@ func _build_openrouter_tab() -> Control:
 
 	var hint := Label.new()
 	hint.text = "Browse models at openrouter.ai/models"
+	hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	container.add_child(hint)
+
+	return container
+
+func _build_local_tab() -> Control:
+	var container := VBoxContainer.new()
+	container.name = "Local"
+	container.add_theme_constant_override("separation", 8)
+
+	# Server Preset
+	var preset_row := HBoxContainer.new()
+	container.add_child(preset_row)
+	var preset_lbl := Label.new()
+	preset_lbl.text = "Server Preset:"
+	preset_lbl.custom_minimum_size.x = 140
+	preset_row.add_child(preset_lbl)
+	_local_preset_option = OptionButton.new()
+	for label in LOCAL_PRESET_LABELS:
+		_local_preset_option.add_item(label)
+	_local_preset_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_local_preset_option.item_selected.connect(_on_local_preset_selected)
+	preset_row.add_child(_local_preset_option)
+
+	# Built-in proxy start/stop (only shown for Claude Proxy preset)
+	_proxy_control_row = HBoxContainer.new()
+	container.add_child(_proxy_control_row)
+	var proxy_lbl := Label.new()
+	proxy_lbl.text = "Built-in Proxy:"
+	proxy_lbl.custom_minimum_size.x = 140
+	_proxy_control_row.add_child(proxy_lbl)
+	_proxy_toggle_btn = Button.new()
+	_proxy_toggle_btn.text = "Start Proxy"
+	_proxy_toggle_btn.pressed.connect(_on_proxy_toggle_pressed)
+	_proxy_control_row.add_child(_proxy_toggle_btn)
+	_proxy_status_label = Label.new()
+	_proxy_status_label.text = "Stopped"
+	_proxy_status_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	_proxy_status_label.custom_minimum_size.x = 120
+	_proxy_control_row.add_child(_proxy_status_label)
+	_proxy_control_row.visible = false
+
+	# Endpoint URL
+	var url_row := HBoxContainer.new()
+	container.add_child(url_row)
+	var url_lbl := Label.new()
+	url_lbl.text = "Endpoint URL:"
+	url_lbl.custom_minimum_size.x = 140
+	url_row.add_child(url_lbl)
+	_local_endpoint_field = LineEdit.new()
+	_local_endpoint_field.placeholder_text = "http://localhost:11434/v1"
+	_local_endpoint_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	url_row.add_child(_local_endpoint_field)
+	_local_status_label = Label.new()
+	_local_status_label.custom_minimum_size.x = 100
+	url_row.add_child(_local_status_label)
+
+	# API key (optional)
+	_local_key_field = _add_key_row(container, "API Key (optional):")
+	_local_key_field.placeholder_text = "Leave empty for Ollama"
+
+	# Model dropdown with refresh
+	_local_model_option = _add_model_dropdown(container, "Model:", [])
+	_local_refresh_btn = Button.new()
+	_local_refresh_btn.text = "Refresh"
+	_local_refresh_btn.pressed.connect(func():
+		var local := _provider_manager.get_provider("local") if _provider_manager else null
+		if local:
+			local.clear_model_cache()
+		_start_model_fetch("local")
+	)
+	_local_model_option.get_parent().add_child(_local_refresh_btn)
+
+	var temp_r := _add_temperature_row(container, "Temperature:",
+		func(v): _local_temp_label.text = "%.2f" % v)
+	_local_temp_slider = temp_r.slider
+	_local_temp_label = temp_r.label
+	_local_tokens_spin = _add_spinbox_row(container, "Max Tokens:", 1, 65536, 4096)
+
+	var hint := Label.new()
+	hint.text = "Works with Ollama, LM Studio, llama.cpp, or any OpenAI-compatible server."
 	hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 	container.add_child(hint)
 
@@ -362,6 +480,9 @@ func _auto_fetch_models() -> void:
 	var openai := _provider_manager.get_provider("openai")
 	if openai and openai.is_configured() and not openai.has_cached_models():
 		_start_model_fetch("openai")
+	var local := _provider_manager.get_provider("local")
+	if local and local.is_configured() and not local.has_cached_models():
+		_start_model_fetch("local")
 
 ## Start an async model fetch: delegate to the provider, connect a one-shot
 ## signal for the result, and show "Loading..." on the refresh button.
@@ -371,9 +492,19 @@ func _start_model_fetch(provider_key: String) -> void:
 	var provider := _provider_manager.get_provider(provider_key)
 	if not provider or provider.is_fetching_models():
 		return
-	var btn: Button = _anthropic_refresh_btn if provider_key == "anthropic" else _openai_refresh_btn
+	var btn: Button
+	match provider_key:
+		"anthropic": btn = _anthropic_refresh_btn
+		"openai": btn = _openai_refresh_btn
+		"local": btn = _local_refresh_btn
+		_: return
+	if not btn:
+		return
 	btn.text = "Loading..."
 	btn.disabled = true
+	if provider_key == "local" and _local_status_label:
+		_local_status_label.text = "Checking..."
+		_local_status_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
 	provider.models_fetched.connect(
 		func(models: Array[String]): _on_models_fetched(provider_key, models),
 		CONNECT_ONE_SHOT
@@ -385,12 +516,18 @@ func _start_model_fetch(provider_key: String) -> void:
 func _on_models_fetched(provider_key: String, models: Array[String]) -> void:
 	var dropdown: OptionButton
 	var btn: Button
-	if provider_key == "anthropic":
-		dropdown = _anthropic_model_option
-		btn = _anthropic_refresh_btn
-	else:
-		dropdown = _openai_model_option
-		btn = _openai_refresh_btn
+	match provider_key:
+		"anthropic":
+			dropdown = _anthropic_model_option
+			btn = _anthropic_refresh_btn
+		"openai":
+			dropdown = _openai_model_option
+			btn = _openai_refresh_btn
+		"local":
+			dropdown = _local_model_option
+			btn = _local_refresh_btn
+		_:
+			return
 
 	# Preserve the current selection even if it isn't in the fetched list.
 	var current_model := ""
@@ -406,6 +543,66 @@ func _on_models_fetched(provider_key: String, models: Array[String]) -> void:
 	_populate_model_dropdown(dropdown, all_models, current_model)
 	btn.text = "Refresh"
 	btn.disabled = false
+	if provider_key == "local" and _local_status_label:
+		if not models.is_empty():
+			_local_status_label.text = "Connected"
+			_local_status_label.add_theme_color_override("font_color", Color(0.4, 0.8, 0.4))
+
+func _on_models_fetch_failed(provider_key: String, _error: String) -> void:
+	if provider_key != "local":
+		return
+	if _local_status_label:
+		_local_status_label.text = "Unreachable"
+		_local_status_label.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
+	if _local_refresh_btn:
+		_local_refresh_btn.text = "Refresh"
+		_local_refresh_btn.disabled = false
+
+func _on_local_preset_selected(index: int) -> void:
+	if index < 0 or index >= LOCAL_PRESET_KEYS.size():
+		return
+	var key := LOCAL_PRESET_KEYS[index]
+	if _proxy_control_row:
+		_proxy_control_row.visible = (key == "claude_proxy")
+		if _proxy_control_row.visible:
+			_update_proxy_button_state()
+	var url: String = LOCAL_PRESETS[key]
+	if url.is_empty():
+		return  # "Custom" — leave URL field for manual editing
+	_local_endpoint_field.text = url
+	var local := _provider_manager.get_provider("local") if _provider_manager else null
+	if local:
+		local.set_endpoint_url(url)
+		local.clear_model_cache()
+		_start_model_fetch("local")
+
+# --- Claude Proxy controls ---
+
+func _on_proxy_toggle_pressed() -> void:
+	if _is_proxy_running_callable.is_valid() and _is_proxy_running_callable.call():
+		if _stop_proxy_callable.is_valid():
+			_stop_proxy_callable.call()
+		_update_proxy_button_state()
+	else:
+		var error: String = ""
+		if _start_proxy_callable.is_valid():
+			error = str(_start_proxy_callable.call())
+		if not error.is_empty():
+			_proxy_status_label.text = error
+			_proxy_status_label.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
+			return
+		_update_proxy_button_state()
+		# Give the server a moment to start, then verify connection by fetching models.
+		get_tree().create_timer(1.5).timeout.connect(func(): _start_model_fetch("local"))
+
+func _update_proxy_button_state() -> void:
+	if not _proxy_toggle_btn or not _proxy_status_label:
+		return
+	var running: bool = _is_proxy_running_callable.is_valid() and _is_proxy_running_callable.call()
+	_proxy_toggle_btn.text = "Stop Proxy" if running else "Start Proxy"
+	_proxy_status_label.text = "Running" if running else "Stopped"
+	var color: Color = Color(0.4, 0.8, 0.4) if running else Color(0.6, 0.6, 0.6)
+	_proxy_status_label.add_theme_color_override("font_color", color)
 
 # --- Populate / Save ---
 
@@ -456,6 +653,25 @@ func _populate_fields() -> void:
 	_openrouter_temp_slider.value = _settings.openrouter_temperature
 	_openrouter_tokens_spin.value = _settings.openrouter_max_tokens
 
+	# Local
+	if _local_endpoint_field:
+		var preset_idx := LOCAL_PRESET_KEYS.find(_settings.local_server_preset)
+		if preset_idx < 0:
+			preset_idx = LOCAL_PRESET_KEYS.find("custom")
+		_local_preset_option.selected = preset_idx
+		var preset_key := LOCAL_PRESET_KEYS[preset_idx] if preset_idx >= 0 else "custom"
+		if _proxy_control_row:
+			_proxy_control_row.visible = (preset_key == "claude_proxy")
+			if _proxy_control_row.visible:
+				_update_proxy_button_state()
+		_local_endpoint_field.text = _settings.local_endpoint_url
+		_local_key_field.text = _settings.local_api_key
+		_local_temp_slider.value = _settings.local_temperature
+		_local_tokens_spin.value = _settings.local_max_tokens
+		if _provider_manager:
+			var local := _provider_manager.get_provider("local")
+			_populate_model_dropdown(_local_model_option, local.get_all_models(), _settings.local_model)
+
 func _set_dropdown_to(dropdown: OptionButton, value: String) -> void:
 	for i in dropdown.item_count:
 		if dropdown.get_item_text(i) == value:
@@ -490,6 +706,14 @@ func _on_save() -> void:
 	_settings.openrouter_temperature = _openrouter_temp_slider.value
 	_settings.openrouter_max_tokens = int(_openrouter_tokens_spin.value)
 
+	if _local_endpoint_field:
+		_settings.local_endpoint_url = _local_endpoint_field.text.strip_edges()
+		_settings.local_server_preset = LOCAL_PRESET_KEYS[_local_preset_option.selected] if _local_preset_option.selected >= 0 else "custom"
+		_settings.local_api_key = _local_key_field.text.strip_edges()
+		_settings.local_model = _local_model_option.get_item_text(_local_model_option.selected) if _local_model_option.item_count > 0 else ""
+		_settings.local_temperature = _local_temp_slider.value
+		_settings.local_max_tokens = int(_local_tokens_spin.value)
+
 	# Register custom models that are not in any provider's known list.
 	if _provider_manager:
 		var anthropic := _provider_manager.get_provider("anthropic")
@@ -506,6 +730,11 @@ func _on_save() -> void:
 		if not _settings.openrouter_model.is_empty() and \
 				not (_settings.openrouter_model in openrouter.get_available_models()):
 			_settings.add_custom_model("openrouter", _settings.openrouter_model)
+
+		var local := _provider_manager.get_provider("local")
+		if not _settings.local_model.is_empty() and \
+				not (_settings.local_model in local.get_available_models()):
+			_settings.add_custom_model("local", _settings.local_model)
 
 	# Save to disk immediately so settings survive an editor crash.
 	_settings.save()

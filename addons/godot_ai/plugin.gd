@@ -12,6 +12,7 @@ var _provider_manager: ProviderManager
 var _settings: AISettings
 var _parsed_focus_chat: Dictionary = {}
 var _parsed_send_code: Dictionary = {}
+var _proxy_pid: int = -1
 
 ## Initialize the plugin: create ProviderManager (must be in tree for HTTP),
 ## create ChatPanel with injected dependencies, connect settings_saved to
@@ -26,6 +27,7 @@ func _enter_tree() -> void:
 
 	_chat_panel = ChatPanel.new()
 	_chat_panel.setup(_provider_manager, _settings, get_editor_interface())
+	_chat_panel.set_proxy_controls(start_claude_proxy, stop_claude_proxy, is_claude_proxy_running)
 	_chat_panel.settings_saved.connect(_on_chat_settings_saved)
 
 	_chat_panel.name = PANEL_NAME
@@ -36,6 +38,7 @@ func _enter_tree() -> void:
 ## Teardown: save settings to disk (batched here instead of per-change),
 ## remove the dock panel, and free all nodes to avoid leaks.
 func _exit_tree() -> void:
+	stop_claude_proxy()
 	if _chat_panel:
 		remove_control_from_docks(_chat_panel)
 		_chat_panel.queue_free()
@@ -78,3 +81,41 @@ func _send_selected_code_to_chat() -> void:
 	if selected.is_empty():
 		return
 	_chat_panel.send_selected_code(selected)
+
+## Launches tools/claude_proxy.py as a background process.
+## Returns "" on success, or an error string on failure.
+func start_claude_proxy() -> String:
+	if _proxy_pid > 0:
+		return ""
+	var proxy_res_path: String = get_script().resource_path.get_base_dir().path_join("tools/claude_proxy.py")
+	var script_path := ProjectSettings.globalize_path(proxy_res_path)
+	if not FileAccess.file_exists(proxy_res_path):
+		return "Proxy script not found at " + proxy_res_path
+	var python_cmd := "python3"
+	if OS.get_name() == "Windows":
+		var output := []
+		var exit_code := OS.execute("where", PackedStringArray(["python3"]), output)
+		if exit_code != 0:
+			OS.execute("where", PackedStringArray(["python"]), output)
+			python_cmd = "python"
+	else:
+		var output := []
+		var exit_code := OS.execute("which", PackedStringArray(["python3"]), output)
+		if exit_code != 0:
+			return "python3 not found. Install Python 3 to use the built-in proxy."
+	var pid := OS.create_process(python_cmd, PackedStringArray([script_path]))
+	if pid <= 0:
+		return "Failed to start proxy process."
+	_proxy_pid = pid
+	return ""
+
+## Stops the running proxy process if one was started by the plugin.
+func stop_claude_proxy() -> void:
+	if _proxy_pid <= 0:
+		return
+	OS.kill(_proxy_pid)
+	_proxy_pid = -1
+
+## Returns true if the proxy was started by this plugin and has not been stopped.
+func is_claude_proxy_running() -> bool:
+	return _proxy_pid > 0

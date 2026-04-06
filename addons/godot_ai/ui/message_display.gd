@@ -39,6 +39,8 @@ static func create_assistant_placeholder(font_size: int = 28) -> MessageDisplay:
 	msg._font_size = font_size
 	msg._is_streaming = true
 	msg._streaming_text = ""
+	var header := msg._make_role_header("Assistant")
+	msg.add_child(header)
 	msg._streaming_label = msg._make_rich_label()
 	msg.add_child(msg._streaming_label)
 	return msg
@@ -66,10 +68,10 @@ func finish_streaming() -> void:
 	_is_streaming = false
 	_full_text = _streaming_text
 
-	# Re-render with full parse (extracts code blocks)
-	if _streaming_label and is_instance_valid(_streaming_label):
-		_streaming_label.queue_free()
-		_streaming_label = null
+	# Clear all children (header + streaming label) before full re-render
+	for child in get_children():
+		child.queue_free()
+	_streaming_label = null
 
 	_render_assistant_message(_full_text)
 

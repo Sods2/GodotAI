@@ -14,6 +14,9 @@ var _provider_manager: ProviderManager = null
 var _settings: AISettings = null
 var _settings_dialog: AISettingsDialog = null
 var _editor_interface: EditorInterface = null
+var _start_proxy_callable: Callable
+var _stop_proxy_callable: Callable
+var _is_proxy_running_callable: Callable
 
 # Chat state
 var _messages: Array = []  # Array of {role, content}
@@ -47,8 +50,21 @@ func setup(provider_manager: ProviderManager, settings: AISettings, editor_inter
 	_provider_manager.response_token.connect(_on_token)
 	_provider_manager.response_completed.connect(_on_completed)
 	_provider_manager.response_error.connect(_on_error)
+	_provider_manager.models_updated.connect(_on_provider_models_updated)
+	_provider_manager.models_fetch_failed.connect(_on_models_fetch_failed)
+
+	# Auto-fetch local models — local is always "configured" (just needs an endpoint URL).
+	var local_provider := _provider_manager.get_provider("local")
+	if local_provider and local_provider.is_configured() and not local_provider.has_cached_models():
+		local_provider.fetch_models()
 
 	_refresh_provider_ui()
+
+## Pass proxy control callables from plugin.gd to be forwarded to the settings dialog.
+func set_proxy_controls(start_fn: Callable, stop_fn: Callable, is_running_fn: Callable) -> void:
+	_start_proxy_callable = start_fn
+	_stop_proxy_callable = stop_fn
+	_is_proxy_running_callable = is_running_fn
 
 func _ready() -> void:
 	_build_ui()
@@ -105,6 +121,7 @@ func _build_ui() -> void:
 	_provider_option.add_item("Anthropic", 0)
 	_provider_option.add_item("OpenAI", 1)
 	_provider_option.add_item("OpenRouter", 2)
+	_provider_option.add_item("Local (Ollama / LM Studio)", 3)
 	_provider_option.item_selected.connect(_on_provider_changed)
 	provider_row.add_child(_provider_option)
 
@@ -189,6 +206,10 @@ func _exit_tree() -> void:
 			_provider_manager.response_completed.disconnect(_on_completed)
 		if _provider_manager.response_error.is_connected(_on_error):
 			_provider_manager.response_error.disconnect(_on_error)
+		if _provider_manager.models_updated.is_connected(_on_provider_models_updated):
+			_provider_manager.models_updated.disconnect(_on_provider_models_updated)
+		if _provider_manager.models_fetch_failed.is_connected(_on_models_fetch_failed):
+			_provider_manager.models_fetch_failed.disconnect(_on_models_fetch_failed)
 	if _settings_dialog:
 		_settings_dialog.queue_free()
 		_settings_dialog = null
@@ -335,6 +356,7 @@ func _on_error(error: String) -> void:
 		_messages.pop_back()
 	_set_waiting(false)
 	_set_status("Error")
+	_scroll_to_bottom()
 
 ## Stop the active stream and roll back any partial state: finishes the
 ## assistant bubble (if any) and removes the unanswered user message.
@@ -349,6 +371,7 @@ func _on_cancel_pressed() -> void:
 	if not _messages.is_empty() and _messages.back().get("role") == "user":
 		_messages.pop_back()
 	_set_waiting(false)
+	_scroll_to_bottom()
 
 func _on_clear_pressed() -> void:
 	_stop_thinking_indicator()
@@ -367,6 +390,7 @@ func _on_settings_pressed() -> void:
 		add_child(_settings_dialog)
 		_settings_dialog.settings_saved.connect(_on_settings_saved)
 		_settings_dialog.setup_provider_manager(_provider_manager)
+		_settings_dialog.set_proxy_controls(_start_proxy_callable, _stop_proxy_callable, _is_proxy_running_callable)
 	_settings_dialog.open_with_settings(_settings)
 
 ## Apply new settings and propagate font size to all existing message widgets,
@@ -387,6 +411,24 @@ func _on_provider_changed(index: int) -> void:
 	if _provider_manager:
 		_provider_manager.set_active_provider(ProviderManager.PROVIDER_KEYS[index])
 	_refresh_model_dropdown()
+	# Trigger health check when switching to local provider
+	if _provider_manager and ProviderManager.PROVIDER_KEYS[index] == "local":
+		var local := _provider_manager.get_provider("local")
+		if local and local.is_configured() and not local.has_cached_models():
+			local.fetch_models()
+
+func _on_models_fetch_failed(provider_key: String, error: String) -> void:
+	if provider_key != _provider_manager.get_active_provider_name():
+		return
+	if provider_key == "local":
+		_set_status("Local server unreachable")
+		var error_display := MessageDisplay.create_assistant_placeholder(_get_editor_font_size())
+		error_display.append_token(
+			"[Error: Local server unreachable]\n%s\n\nMake sure Ollama is running (ollama serve) and the endpoint URL is correct in Settings." % error
+		)
+		error_display.finish_streaming()
+		_add_message_to_list(error_display, MessageDisplay.Role.ASSISTANT)
+		_scroll_to_bottom()
 
 func _on_model_changed(index: int) -> void:
 	if not _provider_manager:
@@ -431,6 +473,10 @@ func _refresh_model_dropdown() -> void:
 	if not found and not provider.model.is_empty():
 		_model_option.add_item(provider.model)
 		_model_option.selected = _model_option.item_count - 1
+
+func _on_provider_models_updated(provider_key: String) -> void:
+	if provider_key == _provider_manager.get_active_provider_name():
+		_refresh_model_dropdown()
 
 func _set_waiting(waiting: bool) -> void:
 	_is_waiting = waiting
@@ -485,6 +531,7 @@ func _load_history() -> void:
 		return
 	_messages = parsed
 	_restore_messages_ui()
+	_scroll_to_bottom()
 
 ## Rebuild the UI from saved history. Unlike the live streaming path, this
 ## renders complete messages directly through MarkdownParser (no token-by-token).
@@ -526,9 +573,10 @@ func send_selected_code(code: String) -> void:
 	_input_field.set_caret_column(0)
 	_input_field.grab_focus()
 
-## Scroll to the bottom after one frame — layout hasn't been computed yet
+## Scroll to the bottom after two frames — layout hasn't been computed yet
 ## at call time, so we wait for the engine to resolve sizes.
 func _scroll_to_bottom() -> void:
+	await get_tree().process_frame
 	await get_tree().process_frame
 	if _scroll_container:
 		_scroll_container.scroll_vertical = _scroll_container.get_v_scroll_bar().max_value
