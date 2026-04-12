@@ -41,7 +41,8 @@ var _elapsed := 0.0
 ## Uses low-level HTTPClient (not HTTPRequest) so the response body can be
 ## read chunk-by-chunk via _process() as it arrives, rather than waiting for
 ## the full response — essential for streaming LLM responses.
-func send_request(host: String, path: String, headers: PackedStringArray, body: String) -> void:
+## port defaults to 443 for HTTPS, 80 for HTTP; use_ssl defaults to true.
+func send_request(host: String, path: String, headers: PackedStringArray, body: String, port: int = -1, use_ssl: bool = true) -> void:
 	if _state != State.IDLE and _state != State.DONE and _state != State.ERROR:
 		push_warning("HTTPStream: request already in progress")
 		return
@@ -57,10 +58,11 @@ func send_request(host: String, path: String, headers: PackedStringArray, body: 
 	_state = State.CONNECTING
 
 	_client = HTTPClient.new()
-	_use_ssl = true
-	_port = 443
+	_use_ssl = use_ssl
+	_port = port if port != -1 else (443 if use_ssl else 80)
 
-	var err := _client.connect_to_host(_host, _port, TLSOptions.client())
+	var tls_options := TLSOptions.client() if _use_ssl else null
+	var err := _client.connect_to_host(_host, _port, tls_options)
 	if err != OK:
 		_state = State.ERROR
 		request_failed.emit("Failed to connect: %s" % error_string(err))
@@ -142,7 +144,7 @@ func _process(delta: float) -> void:
 								_response_body.append_array(chunk)
 							else:
 								chunk_received.emit(chunk.get_string_from_utf8())
-				HTTPClient.STATUS_CONNECTED, HTTPClient.STATUS_DISCONNECTED:
+				HTTPClient.STATUS_CONNECTED, HTTPClient.STATUS_DISCONNECTED, HTTPClient.STATUS_CONNECTION_ERROR:
 					_state = State.DONE
 					_client.close()
 					if _error_reading:

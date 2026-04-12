@@ -9,8 +9,10 @@ extends Node
 signal response_token(text: String)
 signal response_completed(full_text: String)
 signal response_error(error: String)
+signal models_updated(provider_key: String)
+signal models_fetch_failed(provider_key: String, error: String)
 
-const PROVIDER_KEYS: Array[String] = ["anthropic", "openai", "openrouter"]
+const PROVIDER_KEYS: Array[String] = ["anthropic", "openai", "openrouter", "local"]
 
 var _providers: Dictionary = {}   # String -> ProviderBase
 var _active_provider_name := "anthropic"
@@ -21,6 +23,16 @@ func _init() -> void:
 	_providers["anthropic"] = AnthropicProvider.new()
 	_providers["openai"] = OpenAIProvider.new()
 	_providers["openrouter"] = OpenRouterProvider.new()
+	_providers["local"] = OpenAICompatibleProvider.new()
+	for key in _providers:
+		_providers[key].models_fetched.connect(_on_provider_models_fetched.bind(key))
+		_providers[key].models_fetch_failed.connect(_on_provider_models_fetch_failed.bind(key))
+
+func _on_provider_models_fetched(_models: Array[String], provider_key: String) -> void:
+	models_updated.emit(provider_key)
+
+func _on_provider_models_fetch_failed(error: String, provider_key: String) -> void:
+	models_fetch_failed.emit(provider_key, error)
 
 ## Registers all providers as children so their HTTPStream nodes can use the
 ## scene tree, then restores settings if the plugin reloads mid-session.
@@ -94,6 +106,14 @@ func apply_settings(settings: AISettings) -> void:
 	openrouter.temperature = settings.openrouter_temperature
 	openrouter.max_tokens = settings.openrouter_max_tokens
 	openrouter.set_custom_models(settings.custom_models.get("openrouter", []))
+
+	var local: OpenAICompatibleProvider = _providers["local"]
+	local.set_endpoint_url(settings.local_endpoint_url)
+	local.api_key = settings.local_api_key
+	local.model = settings.local_model
+	local.temperature = settings.local_temperature
+	local.max_tokens = settings.local_max_tokens
+	local.set_custom_models(settings.custom_models.get("local", []))
 
 ## Forward a chat request to the active provider after a basic guard check.
 func send_message(messages: Array, system_prompt: String = "") -> void:
