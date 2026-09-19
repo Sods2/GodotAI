@@ -7,6 +7,11 @@ extends EditorPlugin
 
 const PANEL_NAME := "AI Chat"
 
+## Bundled godot_mcp_bridge editor plugin (shipped alongside GodotAI). GodotAI
+## auto-enables it so agentic editor tools work with no extra install.
+const BRIDGE_PLUGIN_NAME := "godot_mcp_bridge"
+const BRIDGE_PLUGIN_CFG := "res://addons/godot_mcp_bridge/plugin.cfg"
+
 var _chat_panel: ChatPanel
 var _provider_manager: ProviderManager
 var _settings: AISettings
@@ -34,6 +39,21 @@ func _enter_tree() -> void:
 	add_control_to_dock(DOCK_SLOT_RIGHT_UL, _chat_panel)
 
 	_cache_shortcuts()
+
+	# Deferred so it runs after the editor's own plugin-loading pass completes.
+	call_deferred("_auto_enable_bridge")
+
+## Enable the bundled godot_mcp_bridge plugin so the agentic editor tools work out of
+## the box. Respects the MCP toggle and no-ops if the bridge addon isn't present or is
+## already enabled. Not disabled on exit — external MCP clients may also rely on it.
+func _auto_enable_bridge() -> void:
+	if not _settings or not _settings.mcp_tools_enabled:
+		return
+	if not FileAccess.file_exists(BRIDGE_PLUGIN_CFG):
+		return
+	if EditorInterface.is_plugin_enabled(BRIDGE_PLUGIN_NAME):
+		return
+	EditorInterface.set_plugin_enabled(BRIDGE_PLUGIN_NAME, true)
 
 ## Teardown: save settings to disk (batched here instead of per-change),
 ## remove the dock panel, and free all nodes to avoid leaks.

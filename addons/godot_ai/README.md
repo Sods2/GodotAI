@@ -47,7 +47,7 @@ An AI coding assistant built directly into the Godot editor. Chat with Claude, C
 ### Manual installation
 
 1. Download or clone this repository.
-2. Copy the `addons/godot_ai/` folder into your project's `addons/` directory.
+2. Copy the `addons/godot_ai/` folder into your project's `addons/` directory. To use the agentic editor tools, also copy `addons/godot_mcp_bridge/` (bundled here) — GodotAI enables it for you.
 3. Enable the plugin: **Project → Project Settings → Plugins → GodotAI → Enable**.
 
 ## Setup
@@ -111,14 +111,13 @@ GodotAI can go beyond chat: with the optional integrations enabled it inspects a
 
 Editor tools require the agentic loop, so enabling them turns agentic mode on automatically. Configure everything under **Settings → General → AI Behavior**: the tool scope (a curated *safe subset* or *all tools*) and a confirmation prompt before destructive actions (remove/detach/disconnect).
 
-### Enabling editor tools (MCP bridge)
+### Editor tools (MCP bridge)
 
-The editor tools are powered by the separate [godot-mcp](https://github.com/Sods2/godot-mcp) project. Install its **editor bridge** alongside GodotAI (you do *not* need the godot-mcp Node.js server — that's only for external AI clients; GodotAI talks to the bridge directly):
+Agentic editor tools are powered by the [godot-mcp](https://github.com/Sods2/godot-mcp) editor bridge, which is **bundled with GodotAI and enabled automatically** — there is no separate install. Installing GodotAI also brings `addons/godot_mcp_bridge/`, and GodotAI turns it on for you the first time it loads. (You do *not* need the godot-mcp Node.js server — that's only for external AI clients like Claude Code. GodotAI talks to the bundled bridge directly over loopback.)
 
-1. Get the `godot_mcp_bridge` addon from the [godot-mcp releases](https://github.com/Sods2/godot-mcp) (the plugin's source repo references it as a git submodule under `third_party/godot-mcp/plugin/addons/godot_mcp_bridge`).
-2. Copy `godot_mcp_bridge` into your project's `addons/` folder.
-3. Enable it: **Project → Project Settings → Plugins → MCP Bridge → Enable**.
-4. Reopen GodotAI's Settings — the **Editor tools** badge should read *connected :6008*.
+So there's nothing to set up: just keep **Editor tools** enabled under **Settings → General → AI Behavior** (on by default). Its badge there should read *connected :6008*.
+
+**Troubleshooting:** if the badge shows *bridge not detected*, open **Project → Project Settings → Plugins** and confirm **MCP Bridge** is enabled.
 
 ### Enabling code intelligence (LSP)
 
