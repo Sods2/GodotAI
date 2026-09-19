@@ -61,33 +61,37 @@ func get_api_path() -> String:
 
 ## Detect reasoning models (o1/o3) before delegating — they don't support
 ## streaming, so the base-class flow collects raw chunks instead of SSE events.
-func send_message(messages: Array, system_prompt: String = "") -> void:
+func send_message(messages: Array, system_prompt: String = "", tools: Array = []) -> void:
 	_is_non_streaming = _is_reasoning_model()
 	_raw_response = ""
-	super(messages, system_prompt)
+	super(messages, system_prompt, tools)
 
 ## Build the request body. Reasoning models omit temperature (unsupported),
 ## use max_completion_tokens instead of max_tokens, and disable streaming.
-func _build_request_body(messages: Array, system_prompt: String) -> Dictionary:
+func _build_request_body(messages: Array, system_prompt: String, tools: Array = []) -> Dictionary:
 	if _is_non_streaming:
 		# Reasoning models: no stream, no temperature, no system role, different token param.
+		# Tool calling is not wired through the non-streaming parse path, so it is omitted here.
 		return {
 			"model": model,
 			"max_completion_tokens": max_tokens,
-			"messages": messages,
+			"messages": _prepare_messages_openai(messages),
 		}
 
 	var full_messages := []
 	if not system_prompt.is_empty():
 		full_messages.append({"role": "system", "content": system_prompt})
-	full_messages.append_array(messages)
-	return {
+	full_messages.append_array(_prepare_messages_openai(messages))
+	var body := {
 		"model": model,
 		"max_tokens": max_tokens,
 		"temperature": temperature,
 		"stream": true,
 		"messages": full_messages,
 	}
+	if not tools.is_empty():
+		body["tools"] = ToolCatalog.to_openai(tools)
+	return body
 
 func _build_headers() -> PackedStringArray:
 	return PackedStringArray([

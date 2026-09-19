@@ -24,6 +24,16 @@ var _send_msg_shortcut_btn: Button
 var _shortcut_capture_target: Button = null
 var _shortcut_capture_original: String = ""
 
+# AI Behavior (agent / integrations) — also on the General tab
+var _agentic_check: CheckBox
+var _mcp_check: CheckBox
+var _mcp_status_label: Label
+var _mcp_scope_option: OptionButton
+var _mcp_confirm_check: CheckBox
+var _lsp_check: CheckBox
+var _lsp_status_label: Label
+var _lsp_mode_option: OptionButton
+
 # Provider selector
 var _provider_option: OptionButton
 
@@ -163,7 +173,81 @@ func _build_general_tab() -> Control:
 	_send_code_shortcut_btn = _add_shortcut_row(container, "Send Selected Code:", "Ctrl+Shift+/")
 	_send_msg_shortcut_btn = _add_shortcut_row(container, "Send Message:", "Ctrl+Enter")
 
+	container.add_child(HSeparator.new())
+	_build_ai_behavior_section(container)
+
 	return container
+
+## Build the agent / integration toggles. All default on; each self-disables when
+## its backing service (godot-mcp bridge on :6008, Godot LSP on :6005) is unreachable.
+func _build_ai_behavior_section(container: VBoxContainer) -> void:
+	var header := Label.new()
+	header.text = "AI Behavior"
+	header.add_theme_font_size_override("font_size", 20)
+	container.add_child(header)
+
+	_agentic_check = CheckBox.new()
+	_agentic_check.text = "Agentic mode — let the AI take actions in the editor"
+	_agentic_check.toggled.connect(_on_agentic_toggled)
+	container.add_child(_agentic_check)
+
+	# Editor tools (MCP bridge) + connection badge
+	var mcp_row := HBoxContainer.new()
+	container.add_child(mcp_row)
+	_mcp_check = CheckBox.new()
+	_mcp_check.text = "    Editor tools (MCP bridge)"
+	_mcp_check.toggled.connect(_on_mcp_toggled)
+	mcp_row.add_child(_mcp_check)
+	_mcp_status_label = _make_status_label()
+	mcp_row.add_child(_mcp_status_label)
+
+	var scope_row := HBoxContainer.new()
+	container.add_child(scope_row)
+	var scope_lbl := Label.new()
+	scope_lbl.text = "        Tool scope:"
+	scope_lbl.custom_minimum_size.x = 200
+	scope_row.add_child(scope_lbl)
+	_mcp_scope_option = OptionButton.new()
+	_mcp_scope_option.add_item("Safe subset", 0)
+	_mcp_scope_option.add_item("All tools", 1)
+	scope_row.add_child(_mcp_scope_option)
+
+	_mcp_confirm_check = CheckBox.new()
+	_mcp_confirm_check.text = "        Confirm before destructive actions (remove / detach / disconnect)"
+	container.add_child(_mcp_confirm_check)
+
+	# Code intelligence (LSP) + connection badge
+	var lsp_row := HBoxContainer.new()
+	container.add_child(lsp_row)
+	_lsp_check = CheckBox.new()
+	_lsp_check.text = "Code intelligence (LSP)"
+	_lsp_check.toggled.connect(_on_lsp_toggled)
+	lsp_row.add_child(_lsp_check)
+	_lsp_status_label = _make_status_label()
+	lsp_row.add_child(_lsp_status_label)
+
+	var lsp_mode_row := HBoxContainer.new()
+	container.add_child(lsp_mode_row)
+	var lsp_mode_lbl := Label.new()
+	lsp_mode_lbl.text = "    LSP mode:"
+	lsp_mode_lbl.custom_minimum_size.x = 200
+	lsp_mode_row.add_child(lsp_mode_lbl)
+	_lsp_mode_option = OptionButton.new()
+	_lsp_mode_option.add_item("Passive context", 0)
+	_lsp_mode_option.add_item("On-demand tool", 1)
+	lsp_mode_row.add_child(_lsp_mode_option)
+
+	var hint := Label.new()
+	hint.text = "Editor tools need the godot_mcp_bridge addon running. LSP uses Godot's language server (Editor Settings > Network)."
+	hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD
+	container.add_child(hint)
+
+func _make_status_label() -> Label:
+	var lbl := Label.new()
+	lbl.text = "not checked"
+	lbl.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	return lbl
 
 ## Build a shortcut capture row: label + button showing the current shortcut +
 ## Reset button. Pressing the shortcut button enters capture mode via
@@ -391,6 +475,45 @@ func _on_tab_changed(index: int) -> void:
 	_syncing = true
 	_provider_option.selected = index - 1
 	_syncing = false
+
+# --- AI Behavior toggles ---
+
+## Turning on editor tools implies agentic mode (option 1 from the design):
+## tools are useless without the loop that executes them, so auto-enable it.
+func _on_mcp_toggled(pressed: bool) -> void:
+	if pressed and _agentic_check and not _agentic_check.button_pressed:
+		_agentic_check.set_pressed_no_signal(true)
+	_update_agent_toggle_states()
+
+func _on_agentic_toggled(_pressed: bool) -> void:
+	_update_agent_toggle_states()
+
+func _on_lsp_toggled(_pressed: bool) -> void:
+	_update_agent_toggle_states()
+
+## Grey out controls whose parent toggle is off. MCP tools require agentic mode;
+## the LSP mode selector requires LSP enabled.
+func _update_agent_toggle_states() -> void:
+	if not _agentic_check:
+		return
+	var agentic := _agentic_check.button_pressed
+	_mcp_check.disabled = not agentic
+	var mcp_active := agentic and _mcp_check.button_pressed
+	_mcp_scope_option.disabled = not mcp_active
+	_mcp_confirm_check.disabled = not mcp_active
+	_lsp_mode_option.disabled = not _lsp_check.button_pressed
+
+## Update the connection badges. Called by the chat panel after it probes the
+## bridge (:6008) and the language server (:6005).
+func refresh_integration_status(bridge_ok: bool, lsp_ok: bool) -> void:
+	_set_status_badge(_mcp_status_label, bridge_ok, "connected :6008", "bridge not detected")
+	_set_status_badge(_lsp_status_label, lsp_ok, "connected :6005", "LSP not detected")
+
+func _set_status_badge(label: Label, ok: bool, ok_text: String, fail_text: String) -> void:
+	if not label:
+		return
+	label.text = "● " + (ok_text if ok else fail_text)
+	label.add_theme_color_override("font_color", Color(0.4, 0.8, 0.4) if ok else Color(0.9, 0.5, 0.3))
 
 # --- Helpers ---
 
@@ -620,6 +743,15 @@ func _populate_fields() -> void:
 	_send_code_shortcut_btn.text = _settings.shortcut_send_code
 	_send_msg_shortcut_btn.text = _settings.shortcut_send_message
 
+	# AI Behavior — set without firing toggled so the coupling logic stays quiet.
+	_agentic_check.set_pressed_no_signal(_settings.agentic_enabled)
+	_mcp_check.set_pressed_no_signal(_settings.mcp_tools_enabled)
+	_mcp_scope_option.selected = 1 if _settings.mcp_tool_scope == "all" else 0
+	_mcp_confirm_check.set_pressed_no_signal(_settings.mcp_confirm_destructive)
+	_lsp_check.set_pressed_no_signal(_settings.lsp_enabled)
+	_lsp_mode_option.selected = 1 if _settings.lsp_mode == "tool" else 0
+	_update_agent_toggle_states()
+
 	# Active provider — sync both dropdown and tab without feedback loop
 	var idx := ProviderManager.PROVIDER_KEYS.find(_settings.active_provider)
 	if idx < 0:
@@ -690,6 +822,13 @@ func _on_save() -> void:
 	_settings.shortcut_focus_chat = _focus_chat_shortcut_btn.text
 	_settings.shortcut_send_code = _send_code_shortcut_btn.text
 	_settings.shortcut_send_message = _send_msg_shortcut_btn.text
+
+	_settings.agentic_enabled = _agentic_check.button_pressed
+	_settings.mcp_tools_enabled = _mcp_check.button_pressed
+	_settings.mcp_tool_scope = "all" if _mcp_scope_option.selected == 1 else "safe"
+	_settings.mcp_confirm_destructive = _mcp_confirm_check.button_pressed
+	_settings.lsp_enabled = _lsp_check.button_pressed
+	_settings.lsp_mode = "tool" if _lsp_mode_option.selected == 1 else "passive"
 
 	_settings.anthropic_api_key = _anthropic_key_field.text.strip_edges()
 	_settings.anthropic_model = _anthropic_model_option.get_item_text(_anthropic_model_option.selected)

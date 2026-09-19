@@ -49,16 +49,18 @@ func get_api_path() -> String:
 
 ## Anthropic places the system prompt as a top-level "system" key rather than
 ## a {"role":"system"} entry in the messages array (which it does not support).
-func _build_request_body(messages: Array, system_prompt: String) -> Dictionary:
+func _build_request_body(messages: Array, system_prompt: String, tools: Array = []) -> Dictionary:
 	var body := {
 		"model": model,
 		"max_tokens": max_tokens,
 		"temperature": temperature,
 		"stream": true,
-		"messages": messages,
+		"messages": _prepare_messages_anthropic(messages),
 	}
 	if not system_prompt.is_empty():
 		body["system"] = system_prompt
+	if not tools.is_empty():
+		body["tools"] = ToolCatalog.to_anthropic(tools)
 	return body
 
 ## Anthropic uses x-api-key (not "Authorization: Bearer") and requires an

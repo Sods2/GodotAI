@@ -12,6 +12,9 @@ An AI coding assistant built directly into the Godot editor. Chat with Claude, C
 - **Markdown rendering** with syntax-highlighted code blocks
 - **Insert at Cursor** — click any code block to insert it into the active script
 - **Context-aware** — automatically includes your active script and scene tree in the prompt
+- **Agentic mode** — let the AI act in the editor (add nodes, set properties, edit scripts, run the game…) through the [godot-mcp](https://github.com/Sods2/godot-mcp) bridge
+- **Code intelligence (LSP)** — feeds GDScript errors and warnings from Godot's language server into the AI's context
+- **Independent toggles** — Agentic, Editor tools (MCP), and Code intelligence (LSP) each switch on/off; all on by default and auto-disabled when their service isn't running
 - **Chat history** — conversations are saved per project and restored on next open
 - **Configurable shortcuts** — focus chat, send selected code, send message
 - **Full settings dialog** — API key, model, temperature, max tokens, system prompt per provider
@@ -95,6 +98,31 @@ Run open-source models on your own hardware with [Ollama](https://ollama.com), [
 5. Pick a model and start chatting.
 
 For model recommendations and full setup, see [OLLAMA_SETUP.md](./OLLAMA_SETUP.md).
+
+## Agentic Mode & Integrations
+
+GodotAI can go beyond chat: with the optional integrations enabled it inspects and modifies the editor and reads live GDScript diagnostics. All three are **on by default** and each quietly disables itself when its backing service isn't reachable — so plain chat always works.
+
+| Capability | What it adds | Needs |
+|---|---|---|
+| **Agentic mode** | The AI requests actions; GodotAI runs them and feeds results back in a loop. | Nothing (built in) |
+| **Editor tools (MCP)** | Add/rename/remove nodes, set properties, edit scripts, run/stop the game, and more. | The `godot_mcp_bridge` addon running on `127.0.0.1:6008` |
+| **Code intelligence (LSP)** | GDScript errors/warnings for the open script — injected into context (*passive*) or fetched on demand (*tool*). | Godot's language server on `127.0.0.1:6005` |
+
+Editor tools require the agentic loop, so enabling them turns agentic mode on automatically. Configure everything under **Settings → General → AI Behavior**: the tool scope (a curated *safe subset* or *all tools*) and a confirmation prompt before destructive actions (remove/detach/disconnect).
+
+### Enabling editor tools (MCP bridge)
+
+The editor tools are powered by the separate [godot-mcp](https://github.com/Sods2/godot-mcp) project. Install its **editor bridge** alongside GodotAI (you do *not* need the godot-mcp Node.js server — that's only for external AI clients; GodotAI talks to the bridge directly):
+
+1. Get the `godot_mcp_bridge` addon. This repo references godot-mcp as a git submodule — after cloning, run `git submodule update --init`, then find it at `third_party/godot-mcp/plugin/addons/godot_mcp_bridge`. Or download it from the [godot-mcp releases](https://github.com/Sods2/godot-mcp).
+2. Copy `godot_mcp_bridge` into your project's `addons/` folder.
+3. Enable it: **Project → Project Settings → Plugins → MCP Bridge → Enable**.
+4. Reopen GodotAI's Settings — the **Editor tools** badge should read *connected :6008*.
+
+### Enabling code intelligence (LSP)
+
+Godot's language server is normally on by default. Verify under **Editor → Editor Settings → Network → Language Server** (default port `6005`). GodotAI connects automatically; the **Code intelligence** badge in Settings shows the status.
 
 ## Keyboard Shortcuts
 

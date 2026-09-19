@@ -10,6 +10,10 @@ signal settings_saved(settings: AISettings)
 
 const HISTORY_DIR := "user://godot_ai_history"
 
+## Safety cap on how many tool-call rounds one user message can trigger before
+## the loop stops on its own.
+const MAX_AGENTIC_ITERATIONS := 8
+
 var _provider_manager: ProviderManager = null
 var _settings: AISettings = null
 var _settings_dialog: AISettingsDialog = null
@@ -19,11 +23,20 @@ var _stop_proxy_callable: Callable
 var _is_proxy_running_callable: Callable
 
 # Chat state
-var _messages: Array = []  # Array of {role, content}
+var _messages: Array = []  # normalized history (see ProviderBase._prepare_messages_*)
 var _current_assistant_display: MessageDisplay = null
 var _is_waiting: bool = false
 var _hints_sent: bool = false  # GDScript hints included only on first message per conversation
 var _welcome_label: Label = null
+
+# Agent / integrations
+var _bridge_client: GodotBridgeClient = null
+var _lsp_client: GodotLspClient = null
+var _agentic_iterations: int = 0
+var _agent_cancelled: bool = false
+var _current_system_prompt: String = ""
+var _bridge_ok: bool = false
+var _lsp_ok: bool = false
 
 # Thinking indicator
 var _thinking_timer: Timer = null
@@ -70,6 +83,13 @@ func _ready() -> void:
 	_build_ui()
 	_refresh_provider_ui()
 	_load_history()
+
+	# Integration clients need to be in the tree to pump their sockets each frame.
+	# They connect lazily on first use, so this is cheap when integrations are off.
+	_bridge_client = GodotBridgeClient.new()
+	add_child(_bridge_client)
+	_lsp_client = GodotLspClient.new()
+	add_child(_lsp_client)
 
 func _build_ui() -> void:
 	# UI built in code (no .tscn) for simpler plugin distribution — no scene loader needed.
@@ -213,6 +233,10 @@ func _exit_tree() -> void:
 	if _settings_dialog:
 		_settings_dialog.queue_free()
 		_settings_dialog = null
+	if _bridge_client:
+		_bridge_client.close()
+	if _lsp_client:
+		_lsp_client.close()
 
 # --- Editor font size ---
 
@@ -303,14 +327,60 @@ func _send_message(user_text: String) -> void:
 	_start_thinking_indicator()
 
 	_set_waiting(true)
+	_agentic_iterations = 0
+	_agent_cancelled = false
 	_scroll_to_bottom()
 
-	# Build context and send — include GDScript hints only on the first message
-	var system_prompt := ""
-	if _editor_interface:
-		system_prompt = ContextBuilder.build_system_prompt(_editor_interface, not _hints_sent)
+	# Connect integrations, then build the (possibly tool/diagnostics-augmented) prompt.
+	await _ensure_integrations()
+	_current_system_prompt = await _build_system_prompt()
+	_provider_manager.send_message(_messages.duplicate(), _current_system_prompt, _active_tools())
 
-	_provider_manager.send_message(_messages.duplicate(), system_prompt)
+## Build the system prompt for a user turn: editor context + GDScript hints, plus an
+## agentic note when tools are active and LSP diagnostics when LSP is in passive mode.
+func _build_system_prompt() -> String:
+	var prompt := ""
+	if _editor_interface:
+		prompt = ContextBuilder.build_system_prompt(_editor_interface, not _hints_sent)
+
+	if not _active_tools().is_empty():
+		prompt += "\n\n" + _agentic_system_note()
+
+	if _settings and _settings.lsp_enabled and _settings.lsp_mode == "passive" and _editor_interface:
+		var diag := await _current_script_diagnostics()
+		if diag != "":
+			prompt += "\n\n" + diag
+
+	return prompt
+
+## Instructions appended to the prompt when editor tools are available.
+func _agentic_system_note() -> String:
+	return """## Editor tools available
+You can call tools to inspect and modify the Godot editor (scene tree, node properties, scripts, running the game). Guidelines:
+- Read before you write: inspect the scene tree or properties before changing them.
+- Node paths are relative to the current scene root; use "." for the root.
+- Make one focused change at a time and explain what you did.
+- Prefer tools over telling the user to do it manually when a tool exists."""
+
+## Ensure the integrations that a turn needs are connected. Called before each send
+## so tool availability is up to date; cheap when integrations are disabled.
+func _ensure_integrations() -> void:
+	if not _settings:
+		return
+	if _settings.agentic_enabled and _settings.mcp_tools_enabled and _bridge_client:
+		_bridge_ok = await _bridge_client.connect_and_wait(1.0)
+
+## The canonical tool list to offer the model this turn, honoring the toggles and
+## live connection state. Empty when agentic mode is off or nothing is reachable.
+func _active_tools() -> Array:
+	if not _settings or not _settings.agentic_enabled:
+		return []
+	var tools: Array = []
+	if _settings.mcp_tools_enabled and _bridge_client and _bridge_client.is_socket_connected():
+		tools.append_array(ToolCatalog.get_mcp_tools(_settings.mcp_tool_scope))
+	if _settings.lsp_enabled and _settings.lsp_mode == "tool":
+		tools.append(ToolCatalog.lsp_diagnostics_tool())
+	return tools
 
 ## Lazily create the assistant placeholder on the first token so that empty
 ## responses (e.g. immediate errors) leave no orphan bubble in the UI.
@@ -324,18 +394,163 @@ func _on_token(token: String) -> void:
 	_current_assistant_display.append_token(token)
 	_scroll_to_bottom()
 
-## Finalize streaming: re-render through MarkdownParser, append to history,
-## persist to disk, and re-enable the input field.
+## Finalize streaming, or — in agentic mode — run any tools the model requested and
+## continue the conversation. Falls back to normal finalization otherwise.
 func _on_completed(full_text: String) -> void:
 	_stop_thinking_indicator()
+
+	var provider: ProviderBase = null
+	if _provider_manager:
+		provider = _provider_manager.get_active_provider()
+	var tool_calls: Array = provider.last_tool_calls.duplicate(true) if provider else []
+	var agentic: bool = _settings != null and _settings.agentic_enabled and not tool_calls.is_empty()
+
+	if agentic and _agentic_iterations < MAX_AGENTIC_ITERATIONS:
+		_run_agent_step(full_text, tool_calls)
+		return
+	if agentic:
+		_append_activity_line("Reached the %d-step action limit — stopping." % MAX_AGENTIC_ITERATIONS)
+
+	# Normal finalization.
 	if _current_assistant_display:
 		_current_assistant_display.finish_streaming()
 	_messages.append({"role": "assistant", "content": full_text})
 	_save_history()
 	_current_assistant_display = null
 	_hints_sent = true
+	_agentic_iterations = 0
 	_set_waiting(false)
 	_scroll_to_bottom()
+
+## One round of the agent loop: record the assistant's tool request, execute each
+## tool (with confirmation for destructive ones), append the results, and re-send.
+func _run_agent_step(assistant_text: String, tool_calls: Array) -> void:
+	# Finish the assistant text bubble that streamed before the tool calls.
+	if _current_assistant_display:
+		_current_assistant_display.finish_streaming()
+		_current_assistant_display = null
+	elif assistant_text.strip_edges() != "":
+		var disp := MessageDisplay.create_assistant_message(assistant_text, _get_editor_font_size())
+		disp.insert_code_requested.connect(_on_insert_code)
+		_add_message_to_list(disp, MessageDisplay.Role.ASSISTANT)
+
+	_messages.append({"role": "assistant", "content": assistant_text, "tool_calls": tool_calls})
+	_hints_sent = true
+
+	# Execute tools one at a time (bridge_client tracks a single in-flight request).
+	var results: Array = []
+	for tc in tool_calls:
+		if _agent_cancelled:
+			break
+		results.append(await _execute_tool(tc))
+
+	# Fill in any tools skipped by cancellation so every tool_use has a result
+	# (required for a valid follow-up request).
+	if results.size() < tool_calls.size():
+		for i in range(results.size(), tool_calls.size()):
+			results.append({
+				"id": tool_calls[i].get("id", ""), "name": tool_calls[i].get("name", ""),
+				"content": "Cancelled by user.", "is_error": true,
+			})
+
+	_messages.append({"role": "tool_results", "results": results})
+	_save_history()
+
+	if _agent_cancelled:
+		_set_waiting(false)
+		return
+
+	# Continue the conversation with the tool results.
+	_agentic_iterations += 1
+	_start_thinking_indicator()
+	await _ensure_integrations()
+	_provider_manager.send_message(_messages.duplicate(), _current_system_prompt, _active_tools())
+
+## Execute a single tool call and return a normalized result dict
+## {id, name, content, is_error}. Routes bridge tools over TCP and the synthetic
+## LSP diagnostics tool locally.
+func _execute_tool(tc: Dictionary) -> Dictionary:
+	var tool_name: String = str(tc.get("name", ""))
+	var input: Dictionary = tc.get("input", {})
+	var activity := _append_activity_line("⚙ %s %s" % [tool_name, _short_args(input)])
+
+	if tool_name == ToolCatalog.LSP_DIAGNOSTICS_TOOL:
+		var text := await _current_script_diagnostics()
+		activity.text = "✓ %s" % tool_name
+		return {"id": tc.get("id", ""), "name": tool_name, "content": text if text != "" else "No diagnostics.", "is_error": false}
+
+	var method := ToolCatalog.method_for(tool_name)
+	if method == "":
+		activity.text = "✗ %s (unknown tool)" % tool_name
+		return {"id": tc.get("id", ""), "name": tool_name, "content": "Unknown tool: %s" % tool_name, "is_error": true}
+
+	if _settings and _settings.mcp_confirm_destructive and ToolCatalog.is_destructive(tool_name):
+		if not await _confirm_tool(tool_name, input):
+			activity.text = "✗ %s (denied)" % tool_name
+			return {"id": tc.get("id", ""), "name": tool_name, "content": "User denied this action.", "is_error": true}
+
+	var res := await _bridge_client.call_method(method, input)
+	if res.has("error"):
+		activity.text = "✗ %s: %s" % [tool_name, str(res["error"])]
+		return {"id": tc.get("id", ""), "name": tool_name, "content": "Error: %s" % JSON.stringify(res["error"]), "is_error": true}
+
+	var result_val = res.get("result", {})
+	# Bridge handlers report logical failures as {"error": ...} inside the result.
+	var is_err: bool = result_val is Dictionary and result_val.has("error")
+	activity.text = ("✗ " if is_err else "✓ ") + tool_name
+	return {"id": tc.get("id", ""), "name": tool_name, "content": JSON.stringify(result_val), "is_error": is_err}
+
+## Show a modal confirmation for a destructive tool. Returns true if the user allows it.
+func _confirm_tool(tool_name: String, input: Dictionary) -> bool:
+	var box := ConfirmationDialog.new()
+	box.title = "Confirm editor action"
+	box.dialog_text = "Allow GodotAI to run this action?\n\n%s %s" % [tool_name, _short_args(input)]
+	add_child(box)
+	var state := {"ok": false}
+	var finish := func(ok: bool):
+		if is_instance_valid(box):
+			state.ok = ok
+			box.queue_free()
+	box.confirmed.connect(func(): finish.call(true))
+	box.canceled.connect(func(): finish.call(false))
+	box.close_requested.connect(func(): finish.call(false))
+	box.popup_centered()
+	await box.tree_exited
+	return state.ok
+
+## Sync the currently open script to the language server and return its formatted
+## diagnostics (empty string if none, no script, or LSP unavailable).
+func _current_script_diagnostics() -> String:
+	if not _lsp_client or not _editor_interface:
+		return ""
+	var script_editor := _editor_interface.get_script_editor()
+	if script_editor == null:
+		return ""
+	var script := script_editor.get_current_script()
+	if script == null:
+		return ""
+	var text := await _lsp_client.get_diagnostics_text(script.resource_path, script.source_code)
+	_lsp_ok = _lsp_client.is_socket_connected()
+	return text
+
+## Append a dim status line to the message list (tool activity, notices). Ephemeral —
+## not part of saved history. Returns the label so callers can update its text.
+func _append_activity_line(text: String) -> Label:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.add_theme_color_override("font_color", Color(0.55, 0.7, 0.9))
+	lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_message_list.add_child(lbl)
+	_scroll_to_bottom()
+	return lbl
+
+## Compact one-line preview of tool arguments for the activity display / confirm dialog.
+func _short_args(input: Dictionary) -> String:
+	if input.is_empty():
+		return ""
+	var s := JSON.stringify(input)
+	return s if s.length() <= 80 else s.substr(0, 77) + "..."
 
 ## Handle provider errors. Rolls back the user message from history if the
 ## provider never responded, so the next send starts from a clean state.
@@ -354,6 +569,7 @@ func _on_error(error: String) -> void:
 	# Remove the pending user message so the next send starts from a clean state
 	if not _messages.is_empty() and _messages.back().get("role") == "user":
 		_messages.pop_back()
+	_agentic_iterations = 0
 	_set_waiting(false)
 	_set_status("Error")
 	_scroll_to_bottom()
@@ -362,6 +578,8 @@ func _on_error(error: String) -> void:
 ## assistant bubble (if any) and removes the unanswered user message.
 func _on_cancel_pressed() -> void:
 	_stop_thinking_indicator()
+	_agent_cancelled = true
+	_agentic_iterations = 0
 	if _provider_manager:
 		_provider_manager.cancel()
 	if _current_assistant_display:
@@ -392,6 +610,18 @@ func _on_settings_pressed() -> void:
 		_settings_dialog.setup_provider_manager(_provider_manager)
 		_settings_dialog.set_proxy_controls(_start_proxy_callable, _stop_proxy_callable, _is_proxy_running_callable)
 	_settings_dialog.open_with_settings(_settings)
+
+	# Probe the integration services so the dialog can show live connection badges.
+	var bridge_ok := false
+	if _bridge_client:
+		bridge_ok = await _bridge_client.probe()
+	var lsp_ok := false
+	if _lsp_client:
+		lsp_ok = await _lsp_client.probe()
+	_bridge_ok = bridge_ok
+	_lsp_ok = lsp_ok
+	if _settings_dialog:
+		_settings_dialog.refresh_integration_status(bridge_ok, lsp_ok)
 
 ## Apply new settings and propagate font size to all existing message widgets,
 ## not just future ones, so the user sees the change immediately.
@@ -545,14 +775,22 @@ func _restore_messages_ui() -> void:
 	var font_size := _get_editor_font_size()
 	for entry in _messages:
 		var role: String = entry.get("role", "")
-		var content: String = entry.get("content", "")
+		var content: String = str(entry.get("content", ""))
 		if role == "user":
 			var display := MessageDisplay.create_user_message(content, font_size)
 			_add_message_to_list(display, MessageDisplay.Role.USER)
 		elif role == "assistant":
-			var display := MessageDisplay.create_assistant_message(content, font_size)
-			display.insert_code_requested.connect(_on_insert_code)
-			_add_message_to_list(display, MessageDisplay.Role.ASSISTANT)
+			if content != "":
+				var display := MessageDisplay.create_assistant_message(content, font_size)
+				display.insert_code_requested.connect(_on_insert_code)
+				_add_message_to_list(display, MessageDisplay.Role.ASSISTANT)
+			# Show the tools this turn requested, if any.
+			for tc in entry.get("tool_calls", []):
+				_append_activity_line("⚙ %s %s" % [str(tc.get("name", "")), _short_args(tc.get("input", {}))])
+		elif role == "tool_results":
+			for r in entry.get("results", []):
+				var mark := "✗ " if r.get("is_error", false) else "✓ "
+				_append_activity_line(mark + str(r.get("name", "")))
 	_hints_sent = true
 
 func _delete_history() -> void:

@@ -109,18 +109,21 @@ func _parse_models_response(json: Dictionary) -> Array[String]:
 	result.sort()
 	return result
 
-func _build_request_body(messages: Array, system_prompt: String) -> Dictionary:
+func _build_request_body(messages: Array, system_prompt: String, tools: Array = []) -> Dictionary:
 	var full_messages: Array = []
 	if not system_prompt.is_empty():
 		full_messages.append({"role": "system", "content": system_prompt})
-	full_messages.append_array(messages)
-	return {
+	full_messages.append_array(_prepare_messages_openai(messages))
+	var body := {
 		"model": model,
 		"max_tokens": max_tokens,
 		"temperature": temperature,
 		"stream": true,
 		"messages": full_messages,
 	}
+	if not tools.is_empty():
+		body["tools"] = ToolCatalog.to_openai(tools)
+	return body
 
 func _build_headers() -> PackedStringArray:
 	var headers := PackedStringArray(["Content-Type: application/json"])

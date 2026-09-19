@@ -18,3 +18,6 @@ export_presets.cfg
 CLAUDE.md
 .claude/
 .mcp.json
+
+# Local-only docs
+TESTING.md

@@ -21,6 +21,11 @@ var model: String = ""
 var temperature: float = 0.7
 var max_tokens: int = 4096
 
+## Tool calls the model requested on the last completed response, as
+## [{id, name, input: Dictionary}]. Empty when no tools were requested.
+## Read by the chat panel after response_completed to drive the agent loop.
+var last_tool_calls: Array = []
+
 var _parent_node: Node = null
 var _http_stream: HTTPStream = null
 var _sse_client := SSEClient.new()
@@ -43,17 +48,19 @@ func _init() -> void:
 func set_parent_node(node: Node) -> void:
 	_parent_node = node
 
-## Send a chat message with optional system prompt.
-## messages: Array of {role: String, content: String} dicts.
-func send_message(messages: Array, system_prompt: String = "") -> void:
+## Send a chat message with optional system prompt and tool definitions.
+## messages: Array of normalized message dicts (see _prepare_messages_* helpers).
+## tools: canonical ToolCatalog tool dicts; [] disables tool calling.
+func send_message(messages: Array, system_prompt: String = "", tools: Array = []) -> void:
 	if not is_configured():
 		response_error.emit("%s API key not set. Open Settings to add your key." % get_provider_name())
 		return
 
 	_sse_client.reset()
 	_stream_completed = false
+	last_tool_calls = []
 
-	var body := _build_request_body(messages, system_prompt)
+	var body := _build_request_body(messages, system_prompt, tools)
 	var body_json := JSON.stringify(body)
 	var headers := _build_headers()
 
@@ -154,9 +161,69 @@ func get_api_use_ssl() -> bool:
 	return true
 
 ## Build the JSON-serialisable request body dict for this provider.
-func _build_request_body(_messages: Array, _system_prompt: String) -> Dictionary:
+## tools: canonical ToolCatalog tool dicts (each provider converts to its own format).
+func _build_request_body(_messages: Array, _system_prompt: String, _tools: Array = []) -> Dictionary:
 	push_error("ProviderBase._build_request_body() not implemented")
 	return {}
+
+# ── Message normalization ─────────────────────────────────────────────────────
+# The chat panel stores conversation history in a provider-agnostic shape:
+#   {role: "user"|"assistant", content: String}                       — plain text
+#   {role: "assistant", content: String, tool_calls: [{id, name, input}]}
+#   {role: "tool_results", results: [{id, name, content, is_error}]}
+# These helpers translate that into each API's wire format. Plain text entries pass
+# through unchanged, so non-agentic conversations are byte-for-byte as before.
+
+## Anthropic format: tool_use / tool_result content blocks.
+func _prepare_messages_anthropic(messages: Array) -> Array:
+	var out: Array = []
+	for m in messages:
+		var role: String = m.get("role", "")
+		if role == "tool_results":
+			var blocks: Array = []
+			for r in m.get("results", []):
+				var block := {"type": "tool_result", "tool_use_id": r.get("id", ""), "content": str(r.get("content", ""))}
+				if r.get("is_error", false):
+					block["is_error"] = true
+				blocks.append(block)
+			out.append({"role": "user", "content": blocks})
+		elif role == "assistant" and m.has("tool_calls"):
+			var blocks: Array = []
+			var content = m.get("content", "")
+			if content != null and str(content) != "":
+				blocks.append({"type": "text", "text": str(content)})
+			for tc in m["tool_calls"]:
+				blocks.append({"type": "tool_use", "id": tc.get("id", ""), "name": tc.get("name", ""), "input": tc.get("input", {})})
+			out.append({"role": "assistant", "content": blocks})
+		else:
+			out.append({"role": role, "content": m.get("content", "")})
+	return out
+
+## OpenAI format: assistant.tool_calls + role:"tool" result messages.
+func _prepare_messages_openai(messages: Array) -> Array:
+	var out: Array = []
+	for m in messages:
+		var role: String = m.get("role", "")
+		if role == "tool_results":
+			for r in m.get("results", []):
+				out.append({"role": "tool", "tool_call_id": r.get("id", ""), "content": str(r.get("content", ""))})
+		elif role == "assistant" and m.has("tool_calls"):
+			var tcs: Array = []
+			for tc in m["tool_calls"]:
+				tcs.append({
+					"id": tc.get("id", ""),
+					"type": "function",
+					"function": {"name": tc.get("name", ""), "arguments": JSON.stringify(tc.get("input", {}))},
+				})
+			var content = m.get("content", "")
+			out.append({
+				"role": "assistant",
+				"content": str(content) if content != null and str(content) != "" else null,
+				"tool_calls": tcs,
+			})
+		else:
+			out.append({"role": role, "content": m.get("content", "")})
+	return out
 
 ## Build the HTTP request headers for this provider.
 func _build_headers() -> PackedStringArray:
@@ -207,6 +274,7 @@ func _on_token(text: String) -> void:
 
 func _on_stream_completed(full_text: String) -> void:
 	_stream_completed = true
+	last_tool_calls = _sse_client.get_tool_calls()
 	response_completed.emit(full_text)
 
 func _on_http_done() -> void:

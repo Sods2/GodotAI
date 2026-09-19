@@ -21,6 +21,12 @@ var _full_text := ""
 var _provider := ""  # "anthropic" | "openai" | "openrouter"
 var _completed := false
 
+# Streaming tool calls, keyed by content-block / choice index.
+# Each entry: {id: String, name: String, args_str: String}. The arguments JSON
+# arrives incrementally (Anthropic input_json_delta / OpenAI function.arguments),
+# so it's accumulated as a string and parsed in get_tool_calls().
+var _tool_calls_by_index := {}
+
 ## Select the token extraction branch for incoming SSE events.
 ## "anthropic" triggers content_block_delta parsing; anything else
 ## uses OpenAI-style choices[0].delta.content parsing.
@@ -33,6 +39,24 @@ func reset() -> void:
 	_buffer = ""
 	_full_text = ""
 	_completed = false
+	_tool_calls_by_index = {}
+
+## Return the tool calls accumulated during the stream, as
+## [{id: String, name: String, input: Dictionary}]. Empty if the model requested none.
+func get_tool_calls() -> Array:
+	var indices := _tool_calls_by_index.keys()
+	indices.sort()
+	var result: Array = []
+	for i in indices:
+		var tc: Dictionary = _tool_calls_by_index[i]
+		var input := {}
+		var args_str: String = tc.get("args_str", "")
+		if args_str.strip_edges() != "":
+			var json := JSON.new()
+			if json.parse(args_str) == OK and json.get_data() is Dictionary:
+				input = json.get_data()
+		result.append({"id": tc.get("id", ""), "name": tc.get("name", ""), "input": input})
+	return result
 
 ## Process any remaining incomplete line in the buffer (call at stream end).
 ## Handles the case where the final SSE event arrives without a trailing newline.
@@ -112,13 +136,28 @@ func _handle_data_line(data: String) -> void:
 ## other event types (message_start, content_block_start, ping) are ignored.
 func _extract_anthropic_token(obj: Dictionary) -> String:
 	# Anthropic streaming event types:
+	# content_block_start -> content_block.type == "tool_use" begins a tool call
 	# content_block_delta -> delta.type == "text_delta" -> delta.text
+	#                     -> delta.type == "input_json_delta" -> tool argument fragment
 	# message_stop -> stream is finished (Anthropic does NOT send [DONE])
 	var event_type = obj.get("type", "")
-	if event_type == "content_block_delta":
+	if event_type == "content_block_start":
+		var block = obj.get("content_block", {})
+		if block.get("type", "") == "tool_use":
+			_tool_calls_by_index[int(obj.get("index", 0))] = {
+				"id": str(block.get("id", "")),
+				"name": str(block.get("name", "")),
+				"args_str": "",
+			}
+	elif event_type == "content_block_delta":
 		var delta = obj.get("delta", {})
-		if delta.get("type", "") == "text_delta":
+		var delta_type = delta.get("type", "")
+		if delta_type == "text_delta":
 			return delta.get("text", "")
+		elif delta_type == "input_json_delta":
+			var idx := int(obj.get("index", 0))
+			if _tool_calls_by_index.has(idx):
+				_tool_calls_by_index[idx]["args_str"] += str(delta.get("partial_json", ""))
 	elif event_type == "message_stop":
 		if not _completed:
 			_completed = true
@@ -129,11 +168,28 @@ func _extract_anthropic_token(obj: Dictionary) -> String:
 ## Token lives at choices[0].delta.content; may be null/missing on the
 ## first chunk (role-only) and last chunk, so the null check is required.
 func _extract_openai_token(obj: Dictionary) -> String:
-	# OpenAI/OpenRouter: choices[0].delta.content
+	# OpenAI/OpenRouter: choices[0].delta.content for text,
+	# choices[0].delta.tool_calls[] for incremental function calls.
 	var choices = obj.get("choices", [])
-	if choices.size() > 0:
-		var delta = choices[0].get("delta", {})
-		var content = delta.get("content", null)
-		if content != null:
-			return str(content)
+	if choices.size() == 0:
+		return ""
+	var delta = choices[0].get("delta", {})
+
+	var tool_calls = delta.get("tool_calls", null)
+	if tool_calls is Array:
+		for tc in tool_calls:
+			var idx := int(tc.get("index", 0))
+			if not _tool_calls_by_index.has(idx):
+				_tool_calls_by_index[idx] = {"id": "", "name": "", "args_str": ""}
+			if tc.has("id") and str(tc["id"]) != "":
+				_tool_calls_by_index[idx]["id"] = str(tc["id"])
+			var fn = tc.get("function", {})
+			if fn.has("name") and str(fn["name"]) != "":
+				_tool_calls_by_index[idx]["name"] = str(fn["name"])
+			if fn.has("arguments"):
+				_tool_calls_by_index[idx]["args_str"] += str(fn["arguments"])
+
+	var content = delta.get("content", null)
+	if content != null:
+		return str(content)
 	return ""

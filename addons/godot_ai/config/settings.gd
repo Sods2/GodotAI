@@ -14,6 +14,7 @@ const SECTION_OPENROUTER := "openrouter"
 const SECTION_LOCAL := "local"
 const SECTION_SHORTCUTS := "shortcuts"
 const SECTION_CUSTOM_MODELS := "custom_models"
+const SECTION_AGENT := "agent"
 
 var _config := ConfigFile.new()
 
@@ -23,6 +24,15 @@ var custom_models: Dictionary = {}
 # General
 var active_provider: String = "anthropic"
 var font_size: int = 28
+
+# Agent / integrations (all default on; each self-disables if its service is
+# unreachable). See ChatPanel and the mcp/lsp clients for how these are consumed.
+var agentic_enabled: bool = true            # master switch for tool calling
+var mcp_tools_enabled: bool = true          # expose godot-mcp bridge editor tools
+var mcp_tool_scope: String = "safe"         # "safe" (curated subset) | "all"
+var mcp_confirm_destructive: bool = true    # prompt before remove/detach/disconnect
+var lsp_enabled: bool = true                # use Godot's language server
+var lsp_mode: String = "passive"            # "passive" (inject diagnostics) | "tool"
 
 # Shortcuts
 var shortcut_focus_chat: String = "Ctrl+/"
@@ -93,6 +103,17 @@ func load() -> void:
 	shortcut_send_code = _config.get_value(SECTION_SHORTCUTS, "send_code", "Ctrl+Shift+/")
 	shortcut_send_message = _config.get_value(SECTION_SHORTCUTS, "send_message", "Ctrl+Enter")
 
+	agentic_enabled = bool(_config.get_value(SECTION_AGENT, "agentic_enabled", agentic_enabled))
+	mcp_tools_enabled = bool(_config.get_value(SECTION_AGENT, "mcp_tools_enabled", mcp_tools_enabled))
+	mcp_tool_scope = _config.get_value(SECTION_AGENT, "mcp_tool_scope", mcp_tool_scope)
+	if mcp_tool_scope not in ["safe", "all"]:
+		mcp_tool_scope = "safe"
+	mcp_confirm_destructive = bool(_config.get_value(SECTION_AGENT, "mcp_confirm_destructive", mcp_confirm_destructive))
+	lsp_enabled = bool(_config.get_value(SECTION_AGENT, "lsp_enabled", lsp_enabled))
+	lsp_mode = _config.get_value(SECTION_AGENT, "lsp_mode", lsp_mode)
+	if lsp_mode not in ["passive", "tool"]:
+		lsp_mode = "passive"
+
 	custom_models = {}
 	for key in ["anthropic", "openai", "openrouter", "local"]:
 		var saved = _config.get_value(SECTION_CUSTOM_MODELS, key, [])
@@ -130,6 +151,13 @@ func save() -> void:
 	_config.set_value(SECTION_SHORTCUTS, "focus_chat", shortcut_focus_chat)
 	_config.set_value(SECTION_SHORTCUTS, "send_code", shortcut_send_code)
 	_config.set_value(SECTION_SHORTCUTS, "send_message", shortcut_send_message)
+
+	_config.set_value(SECTION_AGENT, "agentic_enabled", agentic_enabled)
+	_config.set_value(SECTION_AGENT, "mcp_tools_enabled", mcp_tools_enabled)
+	_config.set_value(SECTION_AGENT, "mcp_tool_scope", mcp_tool_scope)
+	_config.set_value(SECTION_AGENT, "mcp_confirm_destructive", mcp_confirm_destructive)
+	_config.set_value(SECTION_AGENT, "lsp_enabled", lsp_enabled)
+	_config.set_value(SECTION_AGENT, "lsp_mode", lsp_mode)
 
 	for key in ["anthropic", "openai", "openrouter", "local"]:
 		if custom_models.has(key) and not custom_models[key].is_empty():

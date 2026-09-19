@@ -116,11 +116,12 @@ func apply_settings(settings: AISettings) -> void:
 	local.set_custom_models(settings.custom_models.get("local", []))
 
 ## Forward a chat request to the active provider after a basic guard check.
-func send_message(messages: Array, system_prompt: String = "") -> void:
+## tools: canonical ToolCatalog tool dicts; [] disables tool calling.
+func send_message(messages: Array, system_prompt: String = "", tools: Array = []) -> void:
 	if not _active_provider:
 		response_error.emit("No provider selected.")
 		return
-	_active_provider.send_message(messages, system_prompt)
+	_active_provider.send_message(messages, system_prompt, tools)
 
 func cancel() -> void:
 	if _active_provider:
