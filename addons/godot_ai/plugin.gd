@@ -26,7 +26,7 @@ func _enter_tree() -> void:
 	_provider_manager.apply_settings(_settings)
 
 	_chat_panel = ChatPanel.new()
-	_chat_panel.setup(_provider_manager, _settings, get_editor_interface())
+	_chat_panel.setup(_provider_manager, _settings, EditorInterface)
 	_chat_panel.set_proxy_controls(start_claude_proxy, stop_claude_proxy, is_claude_proxy_running)
 	_chat_panel.settings_saved.connect(_on_chat_settings_saved)
 
@@ -77,7 +77,7 @@ func _shortcut_input(event: InputEvent) -> void:
 func _send_selected_code_to_chat() -> void:
 	if not _chat_panel:
 		return
-	var selected := ContextBuilder.get_selected_code(get_editor_interface())
+	var selected := ContextBuilder.get_selected_code(EditorInterface)
 	if selected.is_empty():
 		return
 	_chat_panel.send_selected_code(selected)
