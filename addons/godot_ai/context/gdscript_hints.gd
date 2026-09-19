@@ -80,7 +80,7 @@ class InnerClass:
 ### Editor Plugins
 - Must have `@tool` annotation
 - Extend `EditorPlugin` for main plugin
-- Use `get_editor_interface()` to access editor
+- Use the `EditorInterface` singleton to access editor (Godot 4.2+; `get_editor_interface()` is deprecated)
 - Register bottom panels with `add_control_to_bottom_panel(control, "Tab Name")`
 - Always clean up in `_exit_tree()`
 
