@@ -81,11 +81,13 @@ var _start_proxy_callable: Callable
 var _stop_proxy_callable: Callable
 var _is_proxy_running_callable: Callable
 
+# Use 127.0.0.1 (not "localhost"): on Windows "localhost" often resolves to IPv6
+# ::1, but these servers bind IPv4 127.0.0.1, so Godot's HTTPClient hangs on connect.
 const LOCAL_PRESETS := {
-	"ollama": "http://localhost:11434/v1",
-	"lm_studio": "http://localhost:1234/v1",
-	"llamacpp": "http://localhost:8080/v1",
-	"claude_proxy": "http://localhost:8082/v1",
+	"ollama": "http://127.0.0.1:11434/v1",
+	"lm_studio": "http://127.0.0.1:1234/v1",
+	"llamacpp": "http://127.0.0.1:8080/v1",
+	"claude_proxy": "http://127.0.0.1:8082/v1",
 	"custom": "",
 }
 const LOCAL_PRESET_LABELS: Array[String] = ["Ollama", "LM Studio", "llama.cpp", "Claude Proxy", "Custom"]

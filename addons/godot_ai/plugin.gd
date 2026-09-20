@@ -31,7 +31,7 @@ func _enter_tree() -> void:
 	_provider_manager.apply_settings(_settings)
 
 	_chat_panel = ChatPanel.new()
-	_chat_panel.setup(_provider_manager, _settings, EditorInterface)
+	_chat_panel.setup(_provider_manager, _settings, get_editor_interface())
 	_chat_panel.set_proxy_controls(start_claude_proxy, stop_claude_proxy, is_claude_proxy_running)
 	_chat_panel.settings_saved.connect(_on_chat_settings_saved)
 
@@ -97,7 +97,7 @@ func _shortcut_input(event: InputEvent) -> void:
 func _send_selected_code_to_chat() -> void:
 	if not _chat_panel:
 		return
-	var selected := ContextBuilder.get_selected_code(EditorInterface)
+	var selected := ContextBuilder.get_selected_code(get_editor_interface())
 	if selected.is_empty():
 		return
 	_chat_panel.send_selected_code(selected)
@@ -108,25 +108,71 @@ func start_claude_proxy() -> String:
 	if _proxy_pid > 0:
 		return ""
 	var proxy_res_path: String = get_script().resource_path.get_base_dir().path_join("tools/claude_proxy.py")
-	var script_path := ProjectSettings.globalize_path(proxy_res_path)
 	if not FileAccess.file_exists(proxy_res_path):
 		return "Proxy script not found at " + proxy_res_path
-	var python_cmd := "python3"
-	if OS.get_name() == "Windows":
-		var output := []
-		var exit_code := OS.execute("where", PackedStringArray(["python3"]), output)
-		if exit_code != 0:
-			OS.execute("where", PackedStringArray(["python"]), output)
-			python_cmd = "python"
-	else:
-		var output := []
-		var exit_code := OS.execute("which", PackedStringArray(["python3"]), output)
-		if exit_code != 0:
-			return "python3 not found. Install Python 3 to use the built-in proxy."
-	var pid := OS.create_process(python_cmd, PackedStringArray([script_path]))
+	var script_path := ProjectSettings.globalize_path(proxy_res_path)
+
+	# Pick a working Python interpreter (avoids the Microsoft Store `python3` alias
+	# on Windows, which resolves but doesn't run).
+	var python := _find_python()
+	if python.is_empty():
+		return "Python 3 not found. Install Python 3 to use the built-in proxy."
+
+	# Resolve the claude CLI ourselves and pass it explicitly — the editor's inherited
+	# PATH often lacks it (Store install on Windows, GUI launch on macOS).
+	var claude_path := _find_claude()
+	if claude_path.is_empty():
+		return "Claude CLI not found. Install Claude Code from https://claude.ai/code and sign in."
+
+	var argv := PackedStringArray(python)
+	argv.append(script_path)
+	argv.append("--claude-path")
+	argv.append(claude_path)
+
+	var pid := OS.create_process(argv[0], argv.slice(1))
 	if pid <= 0:
 		return "Failed to start proxy process."
 	_proxy_pid = pid
+	return ""
+
+## Returns an argv prefix for a runnable Python 3 interpreter (e.g. ["py", "-3"] or
+## ["python3"]), or an empty array if none works. Each candidate is verified by
+## actually running `--version` so the Windows Store alias stub is rejected.
+func _find_python() -> PackedStringArray:
+	var candidates: Array[PackedStringArray]
+	if OS.get_name() == "Windows":
+		candidates = [PackedStringArray(["py", "-3"]), PackedStringArray(["python"])]
+	else:
+		candidates = [PackedStringArray(["python3"]), PackedStringArray(["python"])]
+	for candidate in candidates:
+		var probe := PackedStringArray(candidate)
+		probe.append("--version")
+		var output := []
+		if OS.execute(probe[0], probe.slice(1), output) == 0:
+			return candidate
+	return PackedStringArray()
+
+## Resolves an absolute path to the claude executable by scanning PATH plus known
+## install locations. Returns "" if not found. Cross-platform: uses claude.exe on
+## Windows and covers ~/.local/bin, /usr/local/bin and /opt/homebrew/bin on Unix.
+func _find_claude() -> String:
+	var is_windows := OS.get_name() == "Windows"
+	var exe := "claude.exe" if is_windows else "claude"
+	var sep := ";" if is_windows else ":"
+	var dirs := OS.get_environment("PATH").split(sep, false)
+	var home := OS.get_environment("USERPROFILE") if is_windows else OS.get_environment("HOME")
+	if not home.is_empty():
+		dirs.append(home.path_join(".local/bin"))
+	if not is_windows:
+		dirs.append("/usr/local/bin")
+		dirs.append("/opt/homebrew/bin")
+		dirs.append("/usr/bin")
+	for dir in dirs:
+		if dir.is_empty():
+			continue
+		var candidate := dir.path_join(exe)
+		if FileAccess.file_exists(candidate):
+			return candidate
 	return ""
 
 ## Stops the running proxy process if one was started by the plugin.

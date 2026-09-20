@@ -58,7 +58,7 @@ var openrouter_temperature: float = 0.7
 var openrouter_max_tokens: int = 4096
 
 # Local (Ollama / LM Studio / llama.cpp / custom OpenAI-compatible server)
-var local_endpoint_url: String = "http://localhost:11434/v1"
+var local_endpoint_url: String = "http://127.0.0.1:11434/v1"
 var local_api_key: String = ""
 var local_model: String = "llama3.2"
 var local_temperature: float = 0.7
