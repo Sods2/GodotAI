@@ -82,6 +82,42 @@ static func _all_mcp_tools() -> Array:
 			"description": "Get stdout/stderr output from the running game since a given line number.",
 			"schema": _obj({"since_line": _int("Return output starting at this line index. Default 0.")}),
 		},
+		{
+			"name": "list_signal_connections", "method": "signal.list_connections", "scope": "safe", "destructive": false,
+			"description": "List existing signal connections on a node (and, by default, its descendants).",
+			"schema": _obj({
+				"path": _str("Node path relative to the scene root. Omit for the scene root."),
+				"recursive": {"type": "boolean", "description": "Include descendant nodes. Default true."},
+			}),
+		},
+		{
+			"name": "list_animations", "method": "animation.list", "scope": "safe", "destructive": false,
+			"description": "List the animations on an AnimationPlayer node (name, length, track count).",
+			"schema": _obj({"path": _str("Node path of the AnimationPlayer.")}, ["path"]),
+		},
+		{
+			"name": "get_animation", "method": "animation.get", "scope": "safe", "destructive": false,
+			"description": "Get the tracks and keyframes of one animation on an AnimationPlayer.",
+			"schema": _obj({
+				"path": _str("Node path of the AnimationPlayer."),
+				"animation_name": _str("Name of the animation to read."),
+			}, ["path", "animation_name"]),
+		},
+		{
+			"name": "read_resource", "method": "resource.read", "scope": "safe", "destructive": false,
+			"description": "Read a resource file's properties (e.g. a .tres/.res) from res://.",
+			"schema": _obj({"path": _str("res:// path of the resource to read.")}, ["path"]),
+		},
+		{
+			"name": "take_viewport_screenshot", "method": "screenshot.viewport", "scope": "safe", "destructive": false,
+			"description": "Capture the editor viewport as a PNG (base64). Includes the running game when the Game tab is selected.",
+			"schema": _obj({}),
+		},
+		{
+			"name": "take_game_screenshot", "method": "screenshot.game", "scope": "safe", "destructive": false,
+			"description": "Capture the running game's viewport as a PNG (base64) when available; otherwise returns guidance to use take_viewport_screenshot.",
+			"schema": _obj({}),
+		},
 
 		# ── Mutations (safe, reversible via the editor's undo history) ──────────
 		{
@@ -120,6 +156,14 @@ static func _all_mcp_tools() -> Array:
 			}, ["path", "new_parent"]),
 		},
 		{
+			"name": "move_node", "method": "scene.move_node", "scope": "safe", "destructive": false,
+			"description": "Reorder a node among its siblings in the current scene.",
+			"schema": _obj({
+				"path": _str("Node path of the node to move."),
+				"index": _int("New zero-based index among its siblings."),
+			}, ["path", "index"]),
+		},
+		{
 			"name": "insert_code_at_cursor", "method": "script.insert_at_cursor", "scope": "safe", "destructive": false,
 			"description": "Insert code at the cursor position in the currently open script.",
 			"schema": _obj({"text": _str("The code to insert.")}, ["text"]),
@@ -151,6 +195,59 @@ static func _all_mcp_tools() -> Array:
 		{
 			"name": "stop_scene", "method": "run.stop", "scope": "safe", "destructive": false,
 			"description": "Stop the running game.",
+			"schema": _obj({}),
+		},
+
+		# ── Debugging (safe, reversible) ───────────────────────────────────────
+		{
+			"name": "set_breakpoint", "method": "debug.set_breakpoint", "scope": "safe", "destructive": false,
+			"description": "Set a breakpoint at a line in a script. Applies when the game runs (run_scene). Use get_open_scripts/get_current_script to find the file path.",
+			"schema": _obj({
+				"file": _str("res:// path of the script (e.g. \"res://player.gd\")."),
+				"line": _int("1-based line number to break on."),
+			}, ["file", "line"]),
+		},
+		{
+			"name": "remove_breakpoint", "method": "debug.remove_breakpoint", "scope": "safe", "destructive": false,
+			"description": "Remove a previously set breakpoint.",
+			"schema": _obj({
+				"file": _str("res:// path of the script."),
+				"line": _int("1-based line number of the breakpoint to remove."),
+			}, ["file", "line"]),
+		},
+		{
+			"name": "list_breakpoints", "method": "debug.list_breakpoints", "scope": "safe", "destructive": false,
+			"description": "List all currently set breakpoints.",
+			"schema": _obj({}),
+		},
+		{
+			"name": "get_stack_trace", "method": "debug.get_stack_trace", "scope": "safe", "destructive": false,
+			"description": "Get the call stack while paused at a breakpoint. Errors if the game isn't paused.",
+			"schema": _obj({}),
+		},
+		{
+			"name": "get_local_variables", "method": "debug.get_locals", "scope": "safe", "destructive": false,
+			"description": "Get local variables in the current frame while paused at a breakpoint.",
+			"schema": _obj({}),
+		},
+		{
+			"name": "debug_step_over", "method": "debug.step_over", "scope": "safe", "destructive": false,
+			"description": "Step over the current line while paused at a breakpoint.",
+			"schema": _obj({}),
+		},
+		{
+			"name": "debug_step_into", "method": "debug.step_into", "scope": "safe", "destructive": false,
+			"description": "Step into a function call while paused at a breakpoint.",
+			"schema": _obj({}),
+		},
+		{
+			"name": "debug_step_out", "method": "debug.step_out", "scope": "safe", "destructive": false,
+			"description": "Step out of the current function while paused at a breakpoint.",
+			"schema": _obj({}),
+		},
+		{
+			"name": "debug_continue", "method": "debug.continue_execution", "scope": "safe", "destructive": false,
+			"description": "Resume execution while paused at a breakpoint.",
 			"schema": _obj({}),
 		},
 
@@ -196,6 +293,47 @@ static func _all_mcp_tools() -> Array:
 			"name": "detach_script", "method": "script.detach", "scope": "all", "destructive": true,
 			"description": "Detach the script from a node (does not delete the file).",
 			"schema": _obj({"node_path": _str("Node path to detach the script from.")}, ["node_path"]),
+		},
+		{
+			"name": "create_animation", "method": "animation.create", "scope": "all", "destructive": false,
+			"description": "Create a new value-track animation on an AnimationPlayer.",
+			"schema": _obj({
+				"path": _str("Node path of the AnimationPlayer."),
+				"animation_name": _str("Name for the new animation."),
+				"length": {"type": "number", "description": "Animation length in seconds. Default 1.0."},
+				"loop_mode": _int("Loop mode: 0 none, 1 linear, 2 ping-pong. Default 0."),
+				"tracks": {"type": "array", "description": "Optional value tracks: [{path, keys:[{time, value}]}]."},
+			}, ["path", "animation_name"]),
+		},
+		{
+			"name": "write_resource", "method": "resource.write", "scope": "all", "destructive": true,
+			"description": "Set properties on an existing resource file and save it back to res://.",
+			"schema": _obj({
+				"path": _str("res:// path of the resource to write."),
+				"properties": {"type": "object", "description": "Property name/value pairs to set on the resource."},
+			}, ["path", "properties"]),
+		},
+		{
+			"name": "import_resources", "method": "resource.import", "scope": "all", "destructive": false,
+			"description": "(Re)import asset files into the project.",
+			"schema": _obj({
+				"paths": {"type": "array", "items": {"type": "string"}, "description": "res:// paths of the assets to import."},
+			}, ["paths"]),
+		},
+		{
+			"name": "start_profiler", "method": "profiler.start", "scope": "all", "destructive": false,
+			"description": "Start the performance profiler on the running game.",
+			"schema": _obj({}),
+		},
+		{
+			"name": "stop_profiler", "method": "profiler.stop", "scope": "all", "destructive": false,
+			"description": "Stop the profiler and return the collected frame data.",
+			"schema": _obj({}),
+		},
+		{
+			"name": "get_profiler_data", "method": "profiler.get_data", "scope": "all", "destructive": false,
+			"description": "Get the profiler frame data collected so far.",
+			"schema": _obj({}),
 		},
 	]
 

@@ -335,10 +335,12 @@ func _build_openrouter_tab() -> Control:
 	_openrouter_temp_label = temp_r.label
 	_openrouter_tokens_spin = _add_spinbox_row(container, "Max Tokens:", 1, 16384, 4096)
 
-	var hint := Label.new()
-	hint.text = "Browse models at openrouter.ai/models"
-	hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-	container.add_child(hint)
+	# Clickable link to the full, always-current model catalog. Enter any id from
+	# the site into the field above.
+	var browse_link := LinkButton.new()
+	browse_link.text = "Browse all models at openrouter.ai/models ↗"
+	browse_link.pressed.connect(func(): OS.shell_open("https://openrouter.ai/models"))
+	container.add_child(browse_link)
 
 	return container
 
