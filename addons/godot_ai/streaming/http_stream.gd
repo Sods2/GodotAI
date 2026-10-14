@@ -77,6 +77,16 @@ func cancel() -> void:
 	_state = State.IDLE
 	request_cancelled.emit()
 
+## Close the connection once the caller has seen the end-of-stream marker
+## ([DONE] / message_stop). Servers may keep the socket open afterwards with no
+## Content-Length or chunked encoding, so waiting for EOF would end in a spurious
+## read timeout. Emits nothing — the caller already treats the request as done.
+func finish() -> void:
+	if _state == State.IDLE or _state == State.DONE or _state == State.ERROR:
+		return
+	_client.close()
+	_state = State.DONE
+
 func _process(delta: float) -> void:
 	# State machine: CONNECTING -> REQUESTING -> READING -> DONE / ERROR
 	if _state == State.IDLE or _state == State.DONE or _state == State.ERROR:

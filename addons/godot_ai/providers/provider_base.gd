@@ -207,6 +207,8 @@ func _on_token(text: String) -> void:
 
 func _on_stream_completed(full_text: String) -> void:
 	_stream_completed = true
+	if _http_stream and is_instance_valid(_http_stream):
+		_http_stream.finish()
 	response_completed.emit(full_text)
 
 func _on_http_done() -> void:
@@ -225,9 +227,14 @@ func _on_http_cancelled() -> void:
 	_stream_completed = true  # prevent _on_http_done from firing after cancel
 
 func _on_stream_error(message: String) -> void:
+	_stream_completed = true  # the error ends this response; ignore the socket closing after it
+	if _http_stream and is_instance_valid(_http_stream):
+		_http_stream.finish()
 	response_error.emit(message)
 
 func _on_http_error(error: String) -> void:
+	if _stream_completed:
+		return  # response already delivered; a late socket error is not a failure
 	response_error.emit("Network error: " + error)
 
 func _on_models_response(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:

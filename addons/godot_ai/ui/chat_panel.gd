@@ -13,7 +13,6 @@ const HISTORY_DIR := "user://godot_ai_history"
 var _provider_manager: ProviderManager = null
 var _settings: AISettings = null
 var _settings_dialog: AISettingsDialog = null
-var _editor_interface: EditorInterface = null
 var _start_proxy_callable: Callable
 var _stop_proxy_callable: Callable
 var _is_proxy_running_callable: Callable
@@ -42,10 +41,9 @@ var _status_label: Label
 
 ## Inject dependencies after construction. Separate from _ready() because
 ## _ready() fires before the caller has connected providers and settings.
-func setup(provider_manager: ProviderManager, settings: AISettings, editor_interface: EditorInterface) -> void:
+func setup(provider_manager: ProviderManager, settings: AISettings) -> void:
 	_provider_manager = provider_manager
 	_settings = settings
-	_editor_interface = editor_interface
 
 	_provider_manager.response_token.connect(_on_token)
 	_provider_manager.response_completed.connect(_on_completed)
@@ -306,9 +304,7 @@ func _send_message(user_text: String) -> void:
 	_scroll_to_bottom()
 
 	# Build context and send — include GDScript hints only on the first message
-	var system_prompt := ""
-	if _editor_interface:
-		system_prompt = ContextBuilder.build_system_prompt(_editor_interface, not _hints_sent)
+	var system_prompt := ContextBuilder.build_system_prompt(not _hints_sent)
 
 	_provider_manager.send_message(_messages.duplicate(), system_prompt)
 
@@ -438,11 +434,9 @@ func _on_model_changed(index: int) -> void:
 		provider.model = _model_option.get_item_text(index)
 
 func _on_insert_code(code: String) -> void:
-	if _editor_interface:
-		var success := ContextBuilder.insert_at_cursor(_editor_interface, code)
-		if not success:
-			_set_status("No script editor open — code copied to clipboard")
-			DisplayServer.clipboard_set(code)
+	if not ContextBuilder.insert_at_cursor(code):
+		_set_status("No script editor open — code copied to clipboard")
+		DisplayServer.clipboard_set(code)
 
 func _refresh_provider_ui() -> void:
 	if not _provider_manager or not _provider_option:
