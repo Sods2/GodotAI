@@ -152,7 +152,7 @@ func _build_general_tab() -> Control:
 	var container := VBoxContainer.new()
 	container.name = "General"
 	container.add_theme_constant_override("separation", 8)
-	_font_size_spin = _add_spinbox_row(container, "Font Size:", 10, 48, 28)
+	_font_size_spin = _add_spinbox_row(container, "Font Size:", 10, 48, 18)
 
 	container.add_child(HSeparator.new())
 

@@ -217,7 +217,7 @@ func _exit_tree() -> void:
 # --- Editor font size ---
 
 func _get_editor_font_size() -> int:
-	return _settings.font_size if _settings else 28
+	return _settings.font_size if _settings else 18
 
 # --- Thinking indicator ---
 

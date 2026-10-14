@@ -22,7 +22,7 @@ var custom_models: Dictionary = {}
 
 # General
 var active_provider: String = "anthropic"
-var font_size: int = 28
+var font_size: int = 18
 
 # Shortcuts
 var shortcut_focus_chat: String = "Ctrl+/"
@@ -65,7 +65,7 @@ func load() -> void:
 
 	var loaded_provider: String = _config.get_value(SECTION_GENERAL, "active_provider", active_provider)
 	active_provider = loaded_provider if loaded_provider in ["anthropic", "openai", "openrouter", "local"] else "anthropic"
-	font_size = clampi(int(_config.get_value(SECTION_GENERAL, "font_size", 28)), 10, 48)
+	font_size = clampi(int(_config.get_value(SECTION_GENERAL, "font_size", 18)), 10, 48)
 
 	anthropic_api_key = _config.get_value(SECTION_ANTHROPIC, "api_key", "")
 	anthropic_model = _config.get_value(SECTION_ANTHROPIC, "model", anthropic_model)
