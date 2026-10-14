@@ -58,6 +58,14 @@ func _parse_endpoint() -> void:
 		_parsed_host = host_port
 		_parsed_port = 443 if _parsed_use_ssl else 80
 
+	# Godot's HTTPClient resolves "localhost" to IPv6 ::1 on Windows, but local
+	# servers (Ollama, LM Studio, the Claude proxy) bind IPv4 127.0.0.1 — and it
+	# doesn't fall back to IPv4, so it hangs until the connect timeout. Connect over
+	# the literal IPv4 address instead. (macOS/Linux resolve localhost to 127.0.0.1
+	# anyway, so this is a no-op there.)
+	if _parsed_host == "localhost":
+		_parsed_host = "127.0.0.1"
+
 func get_api_host() -> String:
 	return _parsed_host
 

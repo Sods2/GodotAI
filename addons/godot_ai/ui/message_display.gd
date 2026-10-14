@@ -14,7 +14,7 @@ enum Role { USER, ASSISTANT }
 var _role: Role = Role.USER
 var _full_text: String = ""
 var _is_streaming: bool = false
-var _font_size: int = 28
+var _font_size: int = 18
 
 # For streaming: the current trailing RichTextLabel being updated
 var _streaming_label: RichTextLabel = null
@@ -24,7 +24,7 @@ func _ready() -> void:
 	add_theme_constant_override("separation", 4)
 
 ## Factory: create and populate a styled user message bubble.
-static func create_user_message(text: String, font_size: int = 28) -> MessageDisplay:
+static func create_user_message(text: String, font_size: int = 18) -> MessageDisplay:
 	var msg := MessageDisplay.new()
 	msg._role = Role.USER
 	msg._font_size = font_size
@@ -33,7 +33,7 @@ static func create_user_message(text: String, font_size: int = 28) -> MessageDis
 
 ## Factory: create an empty assistant bubble for streaming. Tokens will be
 ## appended via append_token(); call finish_streaming() when done.
-static func create_assistant_placeholder(font_size: int = 28) -> MessageDisplay:
+static func create_assistant_placeholder(font_size: int = 18) -> MessageDisplay:
 	var msg := MessageDisplay.new()
 	msg._role = Role.ASSISTANT
 	msg._font_size = font_size
@@ -47,7 +47,7 @@ static func create_assistant_placeholder(font_size: int = 28) -> MessageDisplay:
 
 ## Factory: render a completed assistant message from saved history.
 ## Bypasses the streaming path — goes straight through MarkdownParser.
-static func create_assistant_message(text: String, font_size: int = 28) -> MessageDisplay:
+static func create_assistant_message(text: String, font_size: int = 18) -> MessageDisplay:
 	var msg := MessageDisplay.new()
 	msg._role = Role.ASSISTANT
 	msg._font_size = font_size

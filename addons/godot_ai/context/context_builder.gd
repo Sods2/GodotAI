@@ -7,7 +7,7 @@ extends RefCounted
 
 ## Build the full system prompt to send with each message.
 ## Pass include_hints=false on follow-up messages to avoid resending ~250 tokens of hints.
-static func build_system_prompt(editor_interface: EditorInterface, include_hints: bool = true) -> String:
+static func build_system_prompt(include_hints: bool = true) -> String:
 	var parts: PackedStringArray = []
 
 	# Base GDScript hints — skip on follow-up turns to save tokens
@@ -15,12 +15,12 @@ static func build_system_prompt(editor_interface: EditorInterface, include_hints
 		parts.append(GDScriptHints.get_system_hints())
 
 	# Current script context
-	var script_context := _get_current_script_context(editor_interface)
+	var script_context := _get_current_script_context()
 	if not script_context.is_empty():
 		parts.append(script_context)
 
 	# Scene context
-	var scene_context := _get_scene_context(editor_interface)
+	var scene_context := _get_scene_context()
 	if not scene_context.is_empty():
 		parts.append(scene_context)
 
@@ -28,11 +28,11 @@ static func build_system_prompt(editor_interface: EditorInterface, include_hints
 
 ## Collect the active script's full source, cursor position, and file path
 ## so the LLM has the exact editing context the user is looking at.
-static func _get_current_script_context(editor_interface: EditorInterface) -> String:
-	if editor_interface == null:
+static func _get_current_script_context() -> String:
+	if not Engine.is_editor_hint():
 		return ""
 
-	var script_editor := editor_interface.get_script_editor()
+	var script_editor := EditorInterface.get_script_editor()
 	if script_editor == null:
 		return ""
 
@@ -74,11 +74,11 @@ static func _find_code_edit(node: Node) -> CodeEdit:
 ## Build a text description of the currently edited scene tree.
 ## Limited to 3 levels deep to keep token usage predictable — unbounded
 ## recursion on complex scenes could produce enormous context strings.
-static func _get_scene_context(editor_interface: EditorInterface) -> String:
-	if editor_interface == null:
+static func _get_scene_context() -> String:
+	if not Engine.is_editor_hint():
 		return ""
 
-	var edited_scene := editor_interface.get_edited_scene_root()
+	var edited_scene := EditorInterface.get_edited_scene_root()
 	if edited_scene == null:
 		return ""
 
@@ -100,11 +100,11 @@ static func _describe_node(node: Node, depth: int, max_depth: int) -> String:
 	return result
 
 ## Get the text currently selected in the script editor (for "send selected code").
-static func get_selected_code(editor_interface: EditorInterface) -> String:
-	if editor_interface == null:
+static func get_selected_code() -> String:
+	if not Engine.is_editor_hint():
 		return ""
 
-	var script_editor := editor_interface.get_script_editor()
+	var script_editor := EditorInterface.get_script_editor()
 	if script_editor == null:
 		return ""
 
@@ -119,11 +119,11 @@ static func get_selected_code(editor_interface: EditorInterface) -> String:
 	return ""
 
 ## Insert text at the current cursor position in the script editor.
-static func insert_at_cursor(editor_interface: EditorInterface, text: String) -> bool:
-	if editor_interface == null:
+static func insert_at_cursor(text: String) -> bool:
+	if not Engine.is_editor_hint():
 		return false
 
-	var script_editor := editor_interface.get_script_editor()
+	var script_editor := EditorInterface.get_script_editor()
 	if script_editor == null:
 		return false
 

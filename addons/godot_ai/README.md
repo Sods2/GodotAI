@@ -104,7 +104,7 @@ Default shortcuts (configurable in Settings → Shortcuts):
 |----------------------|-------------------|
 | Focus chat input     | `Ctrl+/`          |
 | Send selected code   | `Ctrl+Shift+/`    |
-| Send message         | `Enter`           |
+| Send message         | `Ctrl+Enter`      |
 
 ## Usage Tips
 

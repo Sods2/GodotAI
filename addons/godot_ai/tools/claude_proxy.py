@@ -14,6 +14,7 @@ Then in GodotAI Settings → Local tab, select "Claude Proxy" preset.
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,11 @@ CLAUDE_MODELS = [
 ]
 
 VERBOSE = False
+
+# Executable used to invoke the Claude Code CLI. Overridable via --claude-path so
+# the caller (e.g. GodotAI) can pass an absolute path when `claude` isn't on the
+# PATH inherited by this process (common when the editor is launched from a GUI).
+CLAUDE_BIN = "claude"
 
 
 def log(msg: str) -> None:
@@ -114,7 +120,7 @@ def call_claude(prompt: str, system_prompt: str, model: str) -> str:
     Raises RuntimeError on failure.
     """
     cmd = [
-        "claude",
+        CLAUDE_BIN,
         "--print",
         "--output-format", "json",
         "--model", model,
@@ -324,7 +330,7 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
 # ---------------------------------------------------------------------------
 
 def main():
-    global VERBOSE
+    global VERBOSE, CLAUDE_BIN
 
     parser = argparse.ArgumentParser(
         description="OpenAI-compatible proxy for the Claude Code CLI."
@@ -332,12 +338,22 @@ def main():
     parser.add_argument("--port", type=int, default=8082, help="Port to listen on (default: 8082)")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     parser.add_argument("--verbose", action="store_true", help="Log requests and responses to stderr")
+    parser.add_argument(
+        "--claude-path",
+        default="",
+        help="Absolute path to the claude executable (defaults to searching PATH)",
+    )
     args = parser.parse_args()
 
     VERBOSE = args.verbose
 
-    # Verify claude CLI is available before starting
-    claude_path = shutil.which("claude")
+    # Resolve the claude CLI. An explicit --claude-path wins (used when the caller
+    # knows the location but it isn't on this process's PATH); otherwise fall back
+    # to searching PATH.
+    if args.claude_path:
+        claude_path = args.claude_path if os.path.isfile(args.claude_path) else None
+    else:
+        claude_path = shutil.which("claude")
     if not claude_path:
         print(
             "ERROR: 'claude' command not found.\n"
@@ -345,6 +361,7 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+    CLAUDE_BIN = claude_path
 
     print(f"Claude CLI found: {claude_path}")
     print(f"Starting proxy on http://{args.host}:{args.port}")
