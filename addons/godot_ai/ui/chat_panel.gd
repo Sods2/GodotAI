@@ -72,8 +72,8 @@ func _ready() -> void:
 func _build_ui() -> void:
 	# UI built in code (no .tscn) for simpler plugin distribution — no scene loader needed.
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# Keep toolbar controls usable at the default right-dock width
-	custom_minimum_size = Vector2(260, 200)
+	# Soft hint only — Godot docks often ignore min width; layout must fit ~190px.
+	custom_minimum_size = Vector2(180, 200)
 	clip_contents = false
 
 	var vbox := VBoxContainer.new()
@@ -81,68 +81,58 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", 4)
 	add_child(vbox)
 
-	# --- Toolbar (vertical layout for narrow right dock) ---
+	# --- Toolbar: fully stacked so every control fits at default dock width ---
 	var toolbar := VBoxContainer.new()
 	toolbar.add_theme_constant_override("separation", 2)
 	vbox.add_child(toolbar)
 
-	# Row 1: Settings + Clear + Status (above dropdowns)
-	var action_row := HBoxContainer.new()
-	action_row.add_theme_constant_override("separation", 4)
+	# Row 1: Settings + Clear first (never after an expand-fill status label)
+	var action_row := HFlowContainer.new()
+	action_row.add_theme_constant_override("h_separation", 4)
+	action_row.add_theme_constant_override("v_separation", 2)
 	toolbar.add_child(action_row)
-
-	_status_label = Label.new()
-	_status_label.text = ""
-	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_status_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
-	action_row.add_child(_status_label)
 
 	var settings_btn := Button.new()
 	settings_btn.text = "Settings"
+	settings_btn.focus_mode = Control.FOCUS_NONE
 	settings_btn.pressed.connect(_on_settings_pressed)
 	action_row.add_child(settings_btn)
 
 	var clear_btn := Button.new()
 	clear_btn.text = "Clear"
+	clear_btn.focus_mode = Control.FOCUS_NONE
 	clear_btn.pressed.connect(_on_clear_pressed)
 	action_row.add_child(clear_btn)
 
-	# Row 2: Provider
-	var provider_row := HBoxContainer.new()
-	provider_row.add_theme_constant_override("separation", 4)
-	toolbar.add_child(provider_row)
+	# Row 2: status on its own line so it cannot push buttons off-screen
+	_status_label = Label.new()
+	_status_label.text = ""
+	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status_label.clip_text = true
+	_status_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_status_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	toolbar.add_child(_status_label)
 
-	var provider_lbl := Label.new()
-	provider_lbl.text = "Provider:"
-	provider_lbl.custom_minimum_size.x = 56
-	provider_row.add_child(provider_lbl)
-
+	# Row 3: Provider dropdown full width (no side label — tooltip instead)
 	_provider_option = OptionButton.new()
 	_provider_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_provider_option.clip_text = true
+	_provider_option.tooltip_text = "Provider"
 	_provider_option.add_item("Anthropic", 0)
 	_provider_option.add_item("OpenAI", 1)
 	_provider_option.add_item("OpenRouter", 2)
 	_provider_option.add_item("Local", 3)
 	_provider_option.set_item_tooltip(3, "Local (Ollama / LM Studio / llama.cpp)")
 	_provider_option.item_selected.connect(_on_provider_changed)
-	provider_row.add_child(_provider_option)
+	toolbar.add_child(_provider_option)
 
-	# Row 3: Model
-	var model_row := HBoxContainer.new()
-	model_row.add_theme_constant_override("separation", 4)
-	toolbar.add_child(model_row)
-
-	var model_lbl := Label.new()
-	model_lbl.text = "Model:"
-	model_lbl.custom_minimum_size.x = 56
-	model_row.add_child(model_lbl)
-
+	# Row 4: Model dropdown full width
 	_model_option = OptionButton.new()
 	_model_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_model_option.clip_text = true
+	_model_option.tooltip_text = "Model"
 	_model_option.item_selected.connect(_on_model_changed)
-	model_row.add_child(_model_option)
+	toolbar.add_child(_model_option)
 
 	vbox.add_child(HSeparator.new())
 
