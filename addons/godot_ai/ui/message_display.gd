@@ -83,8 +83,8 @@ func finish_streaming() -> void:
 	_render_assistant_message(_full_text)
 
 func _build_user_message(text: String) -> void:
+	_full_text = text
 	var header := _make_role_header("You")
-	header.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	add_child(header)
 
 	var panel := PanelContainer.new()
@@ -130,16 +130,45 @@ func _render_assistant_message(text: String) -> void:
 				label.text = segment.content
 				add_child(label)
 
-func _make_role_header(name: String) -> Label:
+func _make_role_header(name: String) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
 	var lbl := Label.new()
 	lbl.text = name
+	lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	match _role:
 		Role.USER:
 			lbl.add_theme_color_override("font_color", Color(0.5, 0.8, 1.0))
+			lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		Role.ASSISTANT:
 			lbl.add_theme_color_override("font_color", Color(0.5, 1.0, 0.7))
 	lbl.add_theme_font_size_override("font_size", _font_size)
-	return lbl
+	row.add_child(lbl)
+
+	var copy_btn := Button.new()
+	copy_btn.text = "Copy"
+	copy_btn.flat = true
+	copy_btn.focus_mode = Control.FOCUS_NONE
+	copy_btn.tooltip_text = "Copy message"
+	copy_btn.add_theme_font_size_override("font_size", _font_size)
+	copy_btn.pressed.connect(_on_copy_message)
+	if _role == Role.USER:
+		# Copy on the left, "You" right-aligned on the right
+		row.add_child(copy_btn)
+		row.move_child(copy_btn, 0)
+	else:
+		row.add_child(copy_btn)
+	return row
+
+func _on_copy_message() -> void:
+	var text := _full_text
+	if text.is_empty() and _is_streaming:
+		text = _streaming_text
+	if text.is_empty():
+		return
+	DisplayServer.clipboard_set(text)
 
 func _make_rich_label() -> RichTextLabel:
 	var label := RichTextLabel.new()
@@ -148,6 +177,9 @@ func _make_rich_label() -> RichTextLabel:
 	label.scroll_active = false
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Default RichTextLabel is not selectable — only code blocks (TextEdit) were copyable.
+	label.selection_enabled = true
+	label.context_menu_enabled = true
 	label.add_theme_font_size_override("normal_font_size", _font_size)
 	label.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
 	return label
