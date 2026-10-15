@@ -4,6 +4,8 @@ An AI coding assistant built directly into the Godot editor. Chat with Claude, C
 
 ## Features
 
+**Current version: 1.1.3** — see [CHANGELOG.md](./CHANGELOG.md).
+
 - **Chat panel** as an **AI Chat** tab in the top-right editor dock
 - **Multi-provider:** Anthropic (Claude), OpenAI (ChatGPT), OpenRouter (500+ models), Local (Ollama, LM Studio, llama.cpp)
 - **Built-in Claude Proxy** — use your Claude Pro or Max subscription directly; start/stop from within Godot with no API key or separate billing
