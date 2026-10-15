@@ -22,7 +22,8 @@ var _streaming_text: String = ""
 
 func _ready() -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	clip_contents = true
+	# Do not clip — that cut user bubbles mid-word after the narrow-dock pass.
+	clip_contents = false
 	custom_minimum_size.x = 0
 	add_theme_constant_override("separation", 4)
 
@@ -96,10 +97,13 @@ func _build_user_message(text: String) -> void:
 	style.content_margin_bottom = 10
 	panel.add_theme_stylebox_override("panel", style)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.clip_contents = false
 	add_child(panel)
 
 	var label := _make_rich_label()
 	label.text = _escape_bbcode(text)
+	# Keep full user text visible; wrap instead of clipping.
+	label.clip_contents = false
 	panel.add_child(label)
 
 ## Walk the Segment array from MarkdownParser and create a RichTextLabel for

@@ -16,6 +16,27 @@ class Segment:
 	var content: String = ""   # BBCode text or raw code
 	var language: String = ""  # code block language hint
 
+## If a line is a fenced code opener/closer, return the language ("" for close/no lang).
+## Tolerates leading spaces and stray backticks models sometimes emit before ```.
+## Returns null when the line is not a fence.
+static func _fence_line(line: String) -> Variant:
+	var s := line.strip_edges()
+	if s.begins_with("```"):
+		return s.substr(3).strip_edges()
+	# "` ```gdscript" / "`` ```" — junk backticks/spaces before a real fence
+	var fence_at := s.find("```")
+	if fence_at > 0:
+		var prefix := s.substr(0, fence_at).replace("`", "").strip_edges()
+		if prefix.is_empty():
+			return s.substr(fence_at + 3).strip_edges()
+	# Lone "`gdscript" / "``gdscript" opener (no triple backtick) — common model typo
+	var single := RegEx.new()
+	single.compile("^`{1,2}([A-Za-z0-9_+-]*)\s*$")
+	var m := single.search(s)
+	if m:
+		return m.get_string(1)
+	return null
+
 ## Parse markdown text into a list of Segments.
 static func parse(markdown: String) -> Array[Segment]:
 	var segments: Array[Segment] = []
@@ -26,8 +47,9 @@ static func parse(markdown: String) -> Array[Segment]:
 	while i < lines.size():
 		var line := lines[i]
 
-		# Fenced code block
-		if line.begins_with("```"):
+		# Fenced code block (including stray-backtick prefixes)
+		var fence_lang = _fence_line(line)
+		if fence_lang != null:
 			# Flush pending text
 			if not text_buffer.is_empty():
 				var seg := Segment.new()
@@ -36,13 +58,13 @@ static func parse(markdown: String) -> Array[Segment]:
 				segments.append(seg)
 				text_buffer = ""
 
-			var lang := line.substr(3).strip_edges()
+			var lang := str(fence_lang)
 			i += 1
 			var code_lines: PackedStringArray = []
-			while i < lines.size() and not lines[i].begins_with("```"):
+			while i < lines.size() and _fence_line(lines[i]) == null:
 				code_lines.append(lines[i])
 				i += 1
-			# skip closing ```
+			# skip closing fence
 			if i < lines.size():
 				i += 1
 
@@ -73,7 +95,7 @@ static func to_bbcode(markdown: String) -> String:
 	var code_buffer := ""
 
 	for line in lines:
-		if line.begins_with("```"):
+		if _fence_line(line) != null:
 			if in_code_block:
 				result += "[code]%s[/code]\n" % code_buffer.strip_edges().replace("[", "[lb]")
 				code_buffer = ""

@@ -153,6 +153,9 @@ func _build_ui() -> void:
 	_message_list.custom_minimum_size.x = 0
 	_message_list.add_theme_constant_override("separation", 12)
 	_scroll_container.add_child(_message_list)
+	_scroll_container.resized.connect(_sync_message_list_width)
+	# Defer once so the first layout has a real width before bubbles measure.
+	call_deferred("_sync_message_list_width")
 
 	_welcome_label = Label.new()
 	_welcome_label.text = "GodotAI is ready. Open a script and ask a question.\n\nTip: Ctrl/Cmd+Enter to send."
@@ -198,6 +201,17 @@ func _build_ui() -> void:
 	_cancel_button.visible = false
 	_cancel_button.pressed.connect(_on_cancel_pressed)
 	btn_row.add_child(_cancel_button)
+
+func _sync_message_list_width() -> void:
+	if _scroll_container == null or _message_list == null:
+		return
+	var w := _scroll_container.size.x
+	var vbar := _scroll_container.get_v_scroll_bar()
+	if vbar and vbar.visible:
+		w -= vbar.size.x
+	# Floor at 1 so fit_content RichTextLabels get a real wrap width.
+	_message_list.custom_minimum_size.x = maxf(w, 1.0)
+	_message_list.size.x = _message_list.custom_minimum_size.x
 
 ## Save history and disconnect provider signals to avoid dangling references.
 ## Also frees the settings dialog since it's not part of the scene tree hierarchy.
