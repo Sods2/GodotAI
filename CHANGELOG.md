@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.4] - 2026-10-15
+
+- Cancel during connect/request no longer shows a fake “Local server unreachable” error bubble
+- Cancel always drops the pending user turn and any ephemeral error assistant bubble
+
 ## [1.1.3] - 2026-10-15
 
 - Cancel mid-stream removes the partial assistant bubble and the unanswered user message
