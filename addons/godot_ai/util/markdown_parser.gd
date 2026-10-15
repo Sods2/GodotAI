@@ -31,7 +31,7 @@ static func _fence_line(line: String) -> Variant:
 			return s.substr(fence_at + 3).strip_edges()
 	# Lone "`gdscript" / "``gdscript" opener (no triple backtick) — common model typo
 	var single := RegEx.new()
-	single.compile("^`{1,2}([A-Za-z0-9_+-]*)\s*$")
+	single.compile(r"^`{1,2}([A-Za-z0-9_+-]*)\s*$")
 	var m := single.search(s)
 	if m:
 		return m.get_string(1)
