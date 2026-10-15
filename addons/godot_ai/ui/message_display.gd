@@ -21,6 +21,9 @@ var _streaming_label: RichTextLabel = null
 var _streaming_text: String = ""
 
 func _ready() -> void:
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clip_contents = true
+	custom_minimum_size.x = 0
 	add_theme_constant_override("separation", 4)
 
 ## Factory: create and populate a styled user message bubble.
@@ -109,6 +112,7 @@ func _render_assistant_message(text: String) -> void:
 	for segment in segments:
 		if segment.is_code_block:
 			var block := CodeBlock.new()
+			block.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			block.set_font_size(_font_size)
 			block.set_code(segment.content, segment.language)
 			block.insert_requested.connect(insert_code_requested.emit)

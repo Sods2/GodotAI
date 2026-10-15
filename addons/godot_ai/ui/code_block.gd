@@ -35,6 +35,10 @@ func set_font_size(font_size: int) -> void:
 	_apply_font_size()
 
 func _build_ui() -> void:
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	clip_contents = true
+	custom_minimum_size.x = 0
+
 	# Outer panel style
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.13, 0.13, 0.13)
@@ -45,6 +49,7 @@ func _build_ui() -> void:
 	add_theme_stylebox_override("panel", style)
 
 	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_theme_constant_override("separation", 0)
 	add_child(vbox)
 
@@ -57,16 +62,21 @@ func _build_ui() -> void:
 	header_style.set_content_margin(SIDE_TOP, 4)
 	header_style.set_content_margin(SIDE_BOTTOM, 4)
 	header_panel.add_theme_stylebox_override("panel", header_style)
+	header_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vbox.add_child(header_panel)
 
-	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 4)
+	# Flow so Copy/Insert wrap under the lang label on narrow docks
+	var header := HFlowContainer.new()
+	header.add_theme_constant_override("h_separation", 4)
+	header.add_theme_constant_override("v_separation", 2)
 	header_panel.add_child(header)
 
 	_lang_label = Label.new()
 	_lang_label.text = _language if not _language.is_empty() else "code"
 	_lang_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.7))
 	_lang_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_lang_label.clip_text = true
+	_lang_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	header.add_child(_lang_label)
 
 	_copy_btn = Button.new()
@@ -76,18 +86,20 @@ func _build_ui() -> void:
 	header.add_child(_copy_btn)
 
 	_insert_btn = Button.new()
-	_insert_btn.text = "Insert at Cursor"
+	_insert_btn.text = "Insert"
+	_insert_btn.tooltip_text = "Insert at Cursor"
 	_insert_btn.flat = true
 	_insert_btn.pressed.connect(_on_insert)
 	header.add_child(_insert_btn)
 
-	# Code text area — highlighter applied below (set_code may have run before _ready)
+	# Wrap so long lines don't force the dock wider than ~190px
 	_code_label = TextEdit.new()
 	_code_label.text = _code
 	_code_label.editable = false
-	_code_label.wrap_mode = TextEdit.LINE_WRAPPING_NONE
+	_code_label.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_code_label.scroll_fit_content_height = true
-	_code_label.custom_minimum_size.y = 40
+	_code_label.custom_minimum_size = Vector2(0, 40)
+	_code_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_code_label.add_theme_color_override("background_color", Color(0.13, 0.13, 0.13))
 	_code_label.add_theme_constant_override("line_spacing", 2)
 	vbox.add_child(_code_label)

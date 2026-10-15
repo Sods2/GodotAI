@@ -72,9 +72,9 @@ func _ready() -> void:
 func _build_ui() -> void:
 	# UI built in code (no .tscn) for simpler plugin distribution — no scene loader needed.
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	# Soft hint only — Godot docks often ignore min width; layout must fit ~190px.
-	custom_minimum_size = Vector2(180, 200)
-	clip_contents = false
+	# No min width — default docks are ~190px; a min size makes the dock scroll instead of shrink.
+	custom_minimum_size = Vector2(0, 0)
+	clip_contents = true
 
 	var vbox := VBoxContainer.new()
 	vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -117,6 +117,8 @@ func _build_ui() -> void:
 	_provider_option = OptionButton.new()
 	_provider_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_provider_option.clip_text = true
+	_provider_option.fit_to_longest_item = false
+	_provider_option.custom_minimum_size.x = 0
 	_provider_option.tooltip_text = "Provider"
 	_provider_option.add_item("Anthropic", 0)
 	_provider_option.add_item("OpenAI", 1)
@@ -130,6 +132,8 @@ func _build_ui() -> void:
 	_model_option = OptionButton.new()
 	_model_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_model_option.clip_text = true
+	_model_option.fit_to_longest_item = false
+	_model_option.custom_minimum_size.x = 0
 	_model_option.tooltip_text = "Model"
 	_model_option.item_selected.connect(_on_model_changed)
 	toolbar.add_child(_model_option)
@@ -139,11 +143,14 @@ func _build_ui() -> void:
 	# --- Message history ---
 	_scroll_container = ScrollContainer.new()
 	_scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll_container.clip_contents = true
 	vbox.add_child(_scroll_container)
 
 	_message_list = VBoxContainer.new()
 	_message_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_message_list.custom_minimum_size.x = 0
 	_message_list.add_theme_constant_override("separation", 12)
 	_scroll_container.add_child(_message_list)
 
@@ -157,38 +164,40 @@ func _build_ui() -> void:
 
 	vbox.add_child(HSeparator.new())
 
-	# --- Input area ---
-	var input_row := HBoxContainer.new()
-	input_row.add_theme_constant_override("separation", 6)
-	vbox.add_child(input_row)
+	# --- Input area: stacked so Send stays visible under ~190px docks ---
+	var input_col := VBoxContainer.new()
+	input_col.add_theme_constant_override("separation", 4)
+	vbox.add_child(input_col)
 
 	_input_field = TextEdit.new()
-	_input_field.placeholder_text = "Ask GodotAI a question... (Ctrl/Cmd+Enter to send)"
+	_input_field.placeholder_text = "Ask GodotAI... (Ctrl/Cmd+Enter)"
 	_input_field.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_input_field.scroll_fit_content_height = false
-	_input_field.custom_minimum_size.y = 36
+	_input_field.custom_minimum_size = Vector2(0, 36)
 	_input_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_input_field.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_input_field.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	_input_field.gui_input.connect(_on_input_gui_input)
 	_input_field.text_changed.connect(_on_input_text_changed)
-	input_row.add_child(_input_field)
+	input_col.add_child(_input_field)
 
-	var btn_col := VBoxContainer.new()
-	input_row.add_child(btn_col)
+	var btn_row := HFlowContainer.new()
+	btn_row.add_theme_constant_override("h_separation", 4)
+	btn_row.add_theme_constant_override("v_separation", 2)
+	input_col.add_child(btn_row)
 
 	_send_button = Button.new()
 	_send_button.text = "Send"
-	_send_button.custom_minimum_size = Vector2(70, 0)
+	_send_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_send_button.pressed.connect(_on_send_pressed)
-	btn_col.add_child(_send_button)
+	btn_row.add_child(_send_button)
 
 	_cancel_button = Button.new()
 	_cancel_button.text = "Cancel"
-	_cancel_button.custom_minimum_size = Vector2(70, 0)
+	_cancel_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_cancel_button.visible = false
 	_cancel_button.pressed.connect(_on_cancel_pressed)
-	btn_col.add_child(_cancel_button)
+	btn_row.add_child(_cancel_button)
 
 ## Save history and disconnect provider signals to avoid dangling references.
 ## Also frees the settings dialog since it's not part of the scene tree hierarchy.
