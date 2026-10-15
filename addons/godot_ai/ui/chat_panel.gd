@@ -72,6 +72,9 @@ func _ready() -> void:
 func _build_ui() -> void:
 	# UI built in code (no .tscn) for simpler plugin distribution — no scene loader needed.
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Keep toolbar controls usable at the default right-dock width
+	custom_minimum_size = Vector2(260, 200)
+	clip_contents = false
 
 	var vbox := VBoxContainer.new()
 	vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -111,15 +114,17 @@ func _build_ui() -> void:
 
 	var provider_lbl := Label.new()
 	provider_lbl.text = "Provider:"
-	provider_lbl.custom_minimum_size.x = 70
+	provider_lbl.custom_minimum_size.x = 56
 	provider_row.add_child(provider_lbl)
 
 	_provider_option = OptionButton.new()
 	_provider_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_provider_option.clip_text = true
 	_provider_option.add_item("Anthropic", 0)
 	_provider_option.add_item("OpenAI", 1)
 	_provider_option.add_item("OpenRouter", 2)
-	_provider_option.add_item("Local (Ollama / LM Studio)", 3)
+	_provider_option.add_item("Local", 3)
+	_provider_option.set_item_tooltip(3, "Local (Ollama / LM Studio / llama.cpp)")
 	_provider_option.item_selected.connect(_on_provider_changed)
 	provider_row.add_child(_provider_option)
 
@@ -130,11 +135,12 @@ func _build_ui() -> void:
 
 	var model_lbl := Label.new()
 	model_lbl.text = "Model:"
-	model_lbl.custom_minimum_size.x = 70
+	model_lbl.custom_minimum_size.x = 56
 	model_row.add_child(model_lbl)
 
 	_model_option = OptionButton.new()
 	_model_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_model_option.clip_text = true
 	_model_option.item_selected.connect(_on_model_changed)
 	model_row.add_child(_model_option)
 
@@ -169,8 +175,10 @@ func _build_ui() -> void:
 	_input_field = TextEdit.new()
 	_input_field.placeholder_text = "Ask GodotAI a question... (Ctrl/Cmd+Enter to send)"
 	_input_field.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	_input_field.scroll_fit_content_height = false
 	_input_field.custom_minimum_size.y = 36
 	_input_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_input_field.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_input_field.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	_input_field.gui_input.connect(_on_input_gui_input)
 	_input_field.text_changed.connect(_on_input_text_changed)
@@ -266,10 +274,19 @@ func _on_input_gui_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 
 func _on_input_text_changed() -> void:
-	var line_height := _input_field.get_line_height()
+	# Cap growth so a large Ctrl+Shift+/ paste cannot cover the conversation.
+	var line_height := maxi(_input_field.get_line_height(), 1)
+	var max_by_panel := 6
+	if size.y > 0:
+		max_by_panel = maxi(2, int((size.y / 3.0) / float(line_height)))
+	var max_lines := mini(6, max_by_panel)
 	var line_count := _input_field.get_line_count()
-	var clamped := clampi(line_count, 2, 10)
+	var clamped := clampi(line_count, 2, max_lines)
+	_input_field.scroll_fit_content_height = false
 	_input_field.custom_minimum_size.y = line_height * clamped
+	# Also clamp the current size so the control cannot keep a taller layout
+	if _input_field.size.y > _input_field.custom_minimum_size.y:
+		_input_field.size.y = _input_field.custom_minimum_size.y
 
 func _on_send_pressed() -> void:
 	var text := _input_field.text.strip_edges()

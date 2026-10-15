@@ -4,7 +4,7 @@ An AI coding assistant built directly into the Godot editor. Chat with Claude, C
 
 ## Features
 
-- **Chat panel** docked at the bottom of the Godot editor
+- **Chat panel** as an **AI Chat** tab in the top-right editor dock
 - **Multi-provider:** Anthropic (Claude), OpenAI (ChatGPT), OpenRouter (500+ models), Local (Ollama, LM Studio, llama.cpp)
 - **Built-in Claude Proxy** — use your Claude Pro or Max subscription directly; start/stop from within Godot with no API key or separate billing
 - **Local model support** — run fully offline with Ollama, LM Studio, llama.cpp, or any OpenAI-compatible server; no API key or internet required
@@ -49,7 +49,7 @@ An AI coding assistant built directly into the Godot editor. Chat with Claude, C
 
 ## Setup
 
-1. After enabling the plugin, a **GodotAI** panel appears at the bottom of the editor.
+1. After enabling the plugin, an **AI Chat** tab appears in the top-right dock of the editor.
 2. Click the **Settings** button (gear icon) in the panel.
 3. Select your provider (Anthropic, OpenAI, OpenRouter, or Local).
 4. Enter your **API key** for that provider. (Not required for local servers or Claude Proxy.)
@@ -98,7 +98,7 @@ For model recommendations and full setup, see [OLLAMA_SETUP.md](./OLLAMA_SETUP.m
 
 ## Keyboard Shortcuts
 
-Default shortcuts (configurable in Settings → Shortcuts):
+Default shortcuts (configurable in Settings → General):
 
 | Action               | Default           |
 |----------------------|-------------------|

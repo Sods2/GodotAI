@@ -119,6 +119,8 @@ static func get_selected_code() -> String:
 	return ""
 
 ## Insert text at the current cursor position in the script editor.
+## Converts indentation to match the target file (tabs vs spaces) and
+## inserts a blank line before the code when needed.
 static func insert_at_cursor(text: String) -> bool:
 	if not Engine.is_editor_hint():
 		return false
@@ -132,8 +134,96 @@ static func insert_at_cursor(text: String) -> bool:
 		return false
 
 	var code_edit := _find_code_edit(base_editor)
-	if code_edit:
-		code_edit.insert_text_at_caret(text)
-		return true
+	if code_edit == null:
+		return false
 
-	return false
+	var adapted := _adapt_indentation(text, code_edit)
+	adapted = _ensure_blank_line_before(adapted, code_edit)
+	code_edit.insert_text_at_caret(adapted)
+	return true
+
+## Detect whether the target script uses tabs or spaces, then convert
+## leading indentation on every line of `text` to match.
+static func _adapt_indentation(text: String, code_edit: CodeEdit) -> String:
+	var use_tabs := _detect_use_tabs(code_edit)
+	var space_size := _get_indent_size()
+	var lines := text.split("\n")
+	var result: PackedStringArray = []
+	for line in lines:
+		result.append(_convert_line_indent(line, use_tabs, space_size))
+	return "\n".join(result)
+
+## Prefer the file's own indentation. Fall back to the editor setting
+## text_editor/behavior/indent/type (0 = Tabs, 1 = Spaces). Default tabs.
+static func _detect_use_tabs(code_edit: CodeEdit) -> bool:
+	var tab_lines := 0
+	var space_lines := 0
+	for i in code_edit.get_line_count():
+		var line := code_edit.get_line(i)
+		if line.is_empty():
+			continue
+		if line.begins_with("\t"):
+			tab_lines += 1
+		elif line.begins_with(" "):
+			space_lines += 1
+	if tab_lines > 0 or space_lines > 0:
+		return tab_lines >= space_lines
+
+	var settings := EditorInterface.get_editor_settings()
+	if settings and settings.has_setting("text_editor/behavior/indent/type"):
+		# 0 = Tabs, 1 = Spaces
+		return int(settings.get_setting("text_editor/behavior/indent/type")) == 0
+	return true
+
+static func _get_indent_size() -> int:
+	var settings := EditorInterface.get_editor_settings()
+	if settings and settings.has_setting("text_editor/behavior/indent/size"):
+		return maxi(int(settings.get_setting("text_editor/behavior/indent/size")), 1)
+	return 4
+
+## Convert leading whitespace on one line to tabs or spaces.
+## Tabs count as one indent level; runs of `space_size` spaces count as one.
+static func _convert_line_indent(line: String, use_tabs: bool, space_size: int) -> String:
+	var i := 0
+	var levels := 0
+	var extra_spaces := 0
+	while i < line.length():
+		var c := line[i]
+		if c == "\t":
+			levels += 1
+			extra_spaces = 0
+			i += 1
+		elif c == " ":
+			extra_spaces += 1
+			if extra_spaces >= space_size:
+				levels += 1
+				extra_spaces = 0
+			i += 1
+		else:
+			break
+	var content := line.substr(i)
+	if use_tabs:
+		return "\t".repeat(levels) + " ".repeat(extra_spaces) + content
+	return " ".repeat(levels * space_size + extra_spaces) + content
+
+## Insert a separating blank line when the caret sits after non-empty content.
+static func _ensure_blank_line_before(text: String, code_edit: CodeEdit) -> String:
+	var caret_line := code_edit.get_caret_line()
+	var caret_col := code_edit.get_caret_column()
+	var need_blank := false
+
+	if caret_col > 0:
+		# Mid-line insert: start on a new blank line after the current content.
+		need_blank = true
+	elif caret_line > 0:
+		var prev := code_edit.get_line(caret_line - 1)
+		if not prev.strip_edges().is_empty():
+			need_blank = true
+
+	if not need_blank:
+		return text
+
+	# One newline ends the previous line (if mid-line) / separates; second makes blank.
+	if caret_col > 0:
+		return "\n\n" + text
+	return "\n" + text

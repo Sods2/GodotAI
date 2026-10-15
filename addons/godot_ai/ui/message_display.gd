@@ -109,6 +109,7 @@ func _render_assistant_message(text: String) -> void:
 	for segment in segments:
 		if segment.is_code_block:
 			var block := CodeBlock.new()
+			block.set_font_size(_font_size)
 			block.set_code(segment.content, segment.language)
 			block.insert_requested.connect(insert_code_requested.emit)
 			add_child(block)
@@ -150,11 +151,18 @@ func update_font_size(new_size: int) -> void:
 
 func _apply_font_size_to_children(node: Node, new_size: int) -> void:
 	for child in node.get_children():
-		if child is Label:
+		if child is CodeBlock:
+			child.set_font_size(new_size)
+		elif child is Label:
 			child.add_theme_font_size_override("font_size", new_size)
 		elif child is RichTextLabel:
 			child.add_theme_font_size_override("normal_font_size", new_size)
-		elif child is PanelContainer:
+		elif child is TextEdit:
+			child.add_theme_font_size_override("font_size", new_size)
+		elif child is Button:
+			child.add_theme_font_size_override("font_size", new_size)
+		# Recurse into containers so nested code-block widgets are reached
+		if child.get_child_count() > 0 and not (child is CodeBlock):
 			_apply_font_size_to_children(child, new_size)
 
 ## Escape BBCode brackets so user/assistant text can't inject markup
