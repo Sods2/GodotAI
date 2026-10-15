@@ -72,9 +72,12 @@ func finish_streaming() -> void:
 	_is_streaming = false
 	_full_text = _streaming_text
 
-	# Clear all children (header + streaming label) before full re-render
-	for child in get_children():
-		child.queue_free()
+	# Clear all children (header + streaming label) before full re-render.
+	# Free immediately — queue_free left ghosts that survived a following Clear.
+	while get_child_count() > 0:
+		var child := get_child(0)
+		remove_child(child)
+		child.free()
 	_streaming_label = null
 
 	_render_assistant_message(_full_text)

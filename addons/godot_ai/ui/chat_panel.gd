@@ -21,6 +21,7 @@ var _is_proxy_running_callable: Callable
 var _messages: Array = []  # Array of {role, content}
 var _current_assistant_display: MessageDisplay = null
 var _is_waiting: bool = false
+var _stream_gen: int = 0  # bumped on cancel/clear so late provider signals are ignored
 var _hints_sent: bool = false  # GDScript hints included only on first message per conversation
 var _welcome_label: Label = null
 
@@ -330,6 +331,7 @@ func _send_message(user_text: String) -> void:
 	# Show animated thinking indicator in message area
 	_start_thinking_indicator()
 
+	_stream_gen += 1
 	_set_waiting(true)
 	_scroll_to_bottom()
 
@@ -341,6 +343,8 @@ func _send_message(user_text: String) -> void:
 ## Lazily create the assistant placeholder on the first token so that empty
 ## responses (e.g. immediate errors) leave no orphan bubble in the UI.
 func _on_token(token: String) -> void:
+	if not _is_waiting:
+		return
 	if _current_assistant_display == null:
 		# First token: stop thinking indicator and create assistant placeholder
 		_stop_thinking_indicator()
@@ -353,6 +357,8 @@ func _on_token(token: String) -> void:
 ## Finalize streaming: re-render through MarkdownParser, append to history,
 ## persist to disk, and re-enable the input field.
 func _on_completed(full_text: String) -> void:
+	if not _is_waiting:
+		return
 	_stop_thinking_indicator()
 	if _current_assistant_display:
 		_current_assistant_display.finish_streaming()
@@ -366,6 +372,8 @@ func _on_completed(full_text: String) -> void:
 ## Handle provider errors. Rolls back the user message from history if the
 ## provider never responded, so the next send starts from a clean state.
 func _on_error(error: String) -> void:
+	if not _is_waiting:
+		return
 	_stop_thinking_indicator()
 	if _current_assistant_display:
 		_current_assistant_display.append_token("\n\n[Error: %s]" % error)
@@ -387,28 +395,60 @@ func _on_error(error: String) -> void:
 ## Stop the active stream and roll back any partial state: finishes the
 ## assistant bubble (if any) and removes the unanswered user message.
 func _on_cancel_pressed() -> void:
+	_stream_gen += 1
 	_stop_thinking_indicator()
 	if _provider_manager:
 		_provider_manager.cancel()
-	if _current_assistant_display:
-		_current_assistant_display.finish_streaming()
+	# Drop the partial assistant bubble (and its wrapper) instead of finishing it —
+	# keeping a half-stream next to a rolled-back user message is confusing, and
+	# finish_streaming()+queue_free races with a following Clear.
+	if _current_assistant_display and is_instance_valid(_current_assistant_display):
+		var wrapper := _current_assistant_display.get_parent()
+		if wrapper:
+			_message_list.remove_child(wrapper)
+			wrapper.free()
+		else:
+			_current_assistant_display.free()
 	_current_assistant_display = null
 	# Remove the pending user message so the next send starts from a clean state
 	if not _messages.is_empty() and _messages.back().get("role") == "user":
 		_messages.pop_back()
+		# Also remove the last user bubble from the UI if present
+		_remove_last_user_bubble()
 	_set_waiting(false)
 	_scroll_to_bottom()
 
 func _on_clear_pressed() -> void:
+	_stream_gen += 1
 	_stop_thinking_indicator()
-	_messages.clear()
+	if _provider_manager and _is_waiting:
+		_provider_manager.cancel()
 	_current_assistant_display = null
-	for child in _message_list.get_children():
-		child.queue_free()
-	_welcome_label = null  # freed by the loop above if still present
+	_messages.clear()
+	_set_waiting(false)
+	_clear_message_widgets()
 	_hints_sent = false
 	_set_status("")
 	_delete_history()
+
+## Immediately free every message-list child so a following Clear cannot race
+## with deferred queue_free from finish_streaming / cancel.
+func _clear_message_widgets() -> void:
+	while _message_list.get_child_count() > 0:
+		var child: Node = _message_list.get_child(0)
+		_message_list.remove_child(child)
+		child.free()
+	_welcome_label = null
+	_thinking_label = null
+
+func _remove_last_user_bubble() -> void:
+	for i in range(_message_list.get_child_count() - 1, -1, -1):
+		var wrapper: Node = _message_list.get_child(i)
+		for child in wrapper.get_children():
+			if child is MessageDisplay and child._role == MessageDisplay.Role.USER:
+				_message_list.remove_child(wrapper)
+				wrapper.free()
+				return
 
 func _on_settings_pressed() -> void:
 	if not _settings_dialog:
