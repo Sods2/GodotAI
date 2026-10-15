@@ -404,6 +404,9 @@ func _on_error(error: String) -> void:
 func _on_cancel_pressed() -> void:
 	_abort_active_stream()
 	_drop_pending_send_ui()
+	# If a connect-phase failure already painted an error assistant before Cancel
+	# ran, drop that too (error assistants are never stored in _messages).
+	_remove_trailing_ephemeral_assistant()
 	_scroll_to_bottom()
 
 func _on_clear_pressed() -> void:
@@ -442,6 +445,32 @@ func _drop_pending_send_ui() -> void:
 	if not _messages.is_empty() and _messages.back().get("role") == "user":
 		_messages.pop_back()
 	_remove_last_user_bubble()
+
+func _remove_trailing_ephemeral_assistant() -> void:
+	# Assistants only land in _messages on successful completion. A trailing
+	# assistant UI node with no matching history entry is ephemeral (error / ghost).
+	var history_assistants := 0
+	for m in _messages:
+		if m.get("role") == "assistant":
+			history_assistants += 1
+	while _message_list.get_child_count() > 0:
+		var ui_assistants := 0
+		for wrapper in _message_list.get_children():
+			for child in wrapper.get_children():
+				if child is MessageDisplay and child._role == MessageDisplay.Role.ASSISTANT:
+					ui_assistants += 1
+		if ui_assistants <= history_assistants:
+			break
+		var last: Node = _message_list.get_child(_message_list.get_child_count() - 1)
+		var is_assistant := false
+		for child in last.get_children():
+			if child is MessageDisplay and child._role == MessageDisplay.Role.ASSISTANT:
+				is_assistant = true
+				break
+		if not is_assistant:
+			break
+		_message_list.remove_child(last)
+		last.free()
 
 ## Immediately free every message-list child so a following Clear cannot race
 ## with deferred queue_free from finish_streaming / cancel.
