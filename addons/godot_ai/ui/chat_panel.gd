@@ -23,6 +23,7 @@ var _current_assistant_display: MessageDisplay = null
 var _is_waiting: bool = false
 var _stream_gen: int = 0  # bumped on cancel/clear so late provider signals are ignored
 var _accept_gen: int = -1  # generation id currently allowed to update the UI
+var _suppress_transport_errors := false  # set on Cancel/Clear; cleared on next send
 var _hints_sent: bool = false  # GDScript hints included only on first message per conversation
 var _welcome_label: Label = null
 
@@ -336,6 +337,7 @@ func _send_message(user_text: String) -> void:
 
 	_stream_gen += 1
 	_accept_gen = _stream_gen
+	_suppress_transport_errors = false
 	_set_waiting(true)
 	_scroll_to_bottom()
 
@@ -376,7 +378,7 @@ func _on_completed(full_text: String) -> void:
 ## Handle provider errors. Rolls back the user message from history if the
 ## provider never responded, so the next send starts from a clean state.
 func _on_error(error: String) -> void:
-	if not _is_waiting or _accept_gen != _stream_gen:
+	if _suppress_transport_errors or not _is_waiting or _accept_gen != _stream_gen:
 		return
 	_stop_thinking_indicator()
 	if _current_assistant_display:
@@ -389,9 +391,10 @@ func _on_error(error: String) -> void:
 		error_display.append_token("[Error: %s]" % error)
 		error_display.finish_streaming()
 		_add_message_to_list(error_display, MessageDisplay.Role.ASSISTANT)
-	# Remove the pending user message so the next send starts from a clean state
+	# Remove the pending user message from history AND the UI bubble
 	if not _messages.is_empty() and _messages.back().get("role") == "user":
 		_messages.pop_back()
+	_remove_last_user_bubble()
 	_set_waiting(false)
 	_set_status("Error")
 	_scroll_to_bottom()
@@ -400,19 +403,7 @@ func _on_error(error: String) -> void:
 ## assistant bubble (if any) and removes the unanswered user message.
 func _on_cancel_pressed() -> void:
 	_abort_active_stream()
-	# Drop the partial assistant bubble (and its wrapper) instead of finishing it.
-	if _current_assistant_display and is_instance_valid(_current_assistant_display):
-		var wrapper := _current_assistant_display.get_parent()
-		if wrapper:
-			_message_list.remove_child(wrapper)
-			wrapper.free()
-		else:
-			_current_assistant_display.free()
-	_current_assistant_display = null
-	# Remove the pending user message so the next send starts from a clean state
-	if not _messages.is_empty() and _messages.back().get("role") == "user":
-		_messages.pop_back()
-		_remove_last_user_bubble()
+	_drop_pending_send_ui()
 	_scroll_to_bottom()
 
 func _on_clear_pressed() -> void:
@@ -426,14 +417,31 @@ func _on_clear_pressed() -> void:
 	_delete_history()
 
 ## Stop accepting stream UI updates, flip out of waiting, and cancel the provider.
-## Order matters: bump gen + clear waiting first so in-flight signals are ignored.
+## Order matters: bump gen + clear waiting + suppress errors first so in-flight
+## connect failures (common when Cancel hits during CONNECTING) are ignored.
 func _abort_active_stream() -> void:
 	_stream_gen += 1
 	_accept_gen = -1
+	_suppress_transport_errors = true
 	_set_waiting(false)
 	_stop_thinking_indicator()
 	if _provider_manager:
 		_provider_manager.cancel()
+
+## Drop the in-flight user bubble and any partial assistant from this send.
+## Independent of _messages so Cancel still cleans UI if an error already popped history.
+func _drop_pending_send_ui() -> void:
+	if _current_assistant_display and is_instance_valid(_current_assistant_display):
+		var wrapper := _current_assistant_display.get_parent()
+		if wrapper:
+			_message_list.remove_child(wrapper)
+			wrapper.free()
+		else:
+			_current_assistant_display.free()
+	_current_assistant_display = null
+	if not _messages.is_empty() and _messages.back().get("role") == "user":
+		_messages.pop_back()
+	_remove_last_user_bubble()
 
 ## Immediately free every message-list child so a following Clear cannot race
 ## with deferred queue_free from finish_streaming / cancel.
@@ -492,6 +500,10 @@ func _on_models_fetch_failed(provider_key: String, error: String) -> void:
 		return
 	if provider_key == "local":
 		_set_status("Local server unreachable")
+		# Never dump a models-probe failure into the chat during/after an aborted send —
+		# Cancel-while-connecting previously left a fake "Ollama unreachable" assistant bubble.
+		if _is_waiting or _suppress_transport_errors:
+			return
 		var error_display := MessageDisplay.create_assistant_placeholder(_get_editor_font_size())
 		error_display.append_token(
 			"[Error: Local server unreachable]\n%s\n\nMake sure Ollama is running (ollama serve) and the endpoint URL is correct in Settings." % error

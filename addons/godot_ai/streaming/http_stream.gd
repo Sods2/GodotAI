@@ -36,6 +36,7 @@ var _response_body := PackedByteArray()
 var _response_code := 0
 var _error_reading := false
 var _elapsed := 0.0
+var _user_cancelled := false
 
 ## Start a streaming HTTP POST request using HTTPClient in incremental mode.
 ## Uses low-level HTTPClient (not HTTPRequest) so the response body can be
@@ -55,6 +56,7 @@ func send_request(host: String, path: String, headers: PackedStringArray, body: 
 	_response_code = 0
 	_error_reading = false
 	_elapsed = 0.0
+	_user_cancelled = false
 	_state = State.CONNECTING
 
 	_client = HTTPClient.new()
@@ -64,18 +66,27 @@ func send_request(host: String, path: String, headers: PackedStringArray, body: 
 	var tls_options := TLSOptions.client() if _use_ssl else null
 	var err := _client.connect_to_host(_host, _port, tls_options)
 	if err != OK:
-		_state = State.ERROR
-		request_failed.emit("Failed to connect: %s" % error_string(err))
+		_fail("Failed to connect: %s" % error_string(err))
 
 ## Cancel the in-progress request and close the underlying TCP connection.
 ## Uses close() rather than just disconnecting signals because HTTPClient
 ## holds an open socket that must be torn down to free the resource.
+## Closing mid-CONNECTING can make the next poll look like a connection
+## failure — _user_cancelled suppresses any late request_failed emits.
 func cancel() -> void:
 	if _state == State.IDLE or _state == State.DONE or _state == State.ERROR:
 		return
+	_user_cancelled = true
 	_client.close()
 	_state = State.IDLE
 	request_cancelled.emit()
+
+func _fail(message: String) -> void:
+	if _user_cancelled:
+		return
+	_state = State.ERROR
+	_client.close()
+	request_failed.emit(message)
 
 ## Close the connection once the caller has seen the end-of-stream marker
 ## ([DONE] / message_stop). Servers may keep the socket open afterwards with no
@@ -99,9 +110,7 @@ func _process(delta: float) -> void:
 	match _state:
 		State.CONNECTING:
 			if _elapsed > CONNECTION_TIMEOUT:
-				_state = State.ERROR
-				_client.close()
-				request_failed.emit("Connection timed out")
+				_fail("Connection timed out")
 				return
 			match status:
 				HTTPClient.STATUS_CONNECTING, HTTPClient.STATUS_RESOLVING:
@@ -111,13 +120,9 @@ func _process(delta: float) -> void:
 					_state = State.REQUESTING
 					var err := _client.request(HTTPClient.METHOD_POST, _path, _headers, _body)
 					if err != OK:
-						_state = State.ERROR
-						_client.close()
-						request_failed.emit("Failed to send request: %s" % error_string(err))
+						_fail("Failed to send request: %s" % error_string(err))
 				_:
-					_state = State.ERROR
-					_client.close()
-					request_failed.emit("Connection failed (status %d)" % status)
+					_fail("Connection failed (status %d)" % status)
 
 		State.REQUESTING:
 			match status:
@@ -130,15 +135,11 @@ func _process(delta: float) -> void:
 					_elapsed = 0.0
 					_state = State.READING
 				_:
-					_state = State.ERROR
-					_client.close()
-					request_failed.emit("Request failed (status %d)" % status)
+					_fail("Request failed (status %d)" % status)
 
 		State.READING:
 			if _elapsed > READ_TIMEOUT:
-				_state = State.ERROR
-				_client.close()
-				request_failed.emit("Read timed out")
+				_fail("Read timed out")
 				return
 			match status:
 				HTTPClient.STATUS_BODY:
@@ -157,12 +158,12 @@ func _process(delta: float) -> void:
 				HTTPClient.STATUS_CONNECTED, HTTPClient.STATUS_DISCONNECTED, HTTPClient.STATUS_CONNECTION_ERROR:
 					_state = State.DONE
 					_client.close()
+					if _user_cancelled:
+						return
 					if _error_reading:
 						var body := _response_body.get_string_from_utf8()
 						request_failed.emit("HTTP %d: %s" % [_response_code, body])
 					else:
 						request_completed.emit()
 				_:
-					_state = State.ERROR
-					_client.close()
-					request_failed.emit("Stream read error (status %d)" % status)
+					_fail("Stream read error (status %d)" % status)
