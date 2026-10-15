@@ -6,6 +6,9 @@ extends EditorPlugin
 ## Registers the chat panel, wires providers, loads settings.
 
 const PANEL_NAME := "AI Chat"
+# 280 / 1280 from dock-width preference shots on a 1280×800 editor (~22%).
+const DOCK_WIDTH_RATIO := 280.0 / 1280.0
+const DOCK_WIDTH_FLOOR_PX := 200
 
 var _chat_panel: ChatPanel
 var _provider_manager: ProviderManager
@@ -32,6 +35,8 @@ func _enter_tree() -> void:
 
 	_chat_panel.name = PANEL_NAME
 	add_control_to_dock(DOCK_SLOT_RIGHT_UL, _chat_panel)
+	# Preferred width ≈ 22% of editor (280px on a 1280-wide window from Purple's pick).
+	call_deferred("_apply_preferred_dock_width")
 
 	_cache_shortcuts()
 
@@ -51,6 +56,60 @@ func _exit_tree() -> void:
 	if _settings:
 		_settings.save()
 		_settings = null
+
+## Size the AI Chat dock as a fraction of the editor width so it scales across
+## resolutions. Tries the enclosing left/right SplitContainer first; falls back
+## to a minimum-size hint on the panel. Runs once on enable (does not fight
+## later manual drags on every resize).
+func _apply_preferred_dock_width(attempt: int = 0) -> void:
+	if _chat_panel == null or not is_instance_valid(_chat_panel):
+		return
+	var base := EditorInterface.get_base_control()
+	var editor_w := base.size.x if base else 0.0
+	if editor_w <= 1.0:
+		editor_w = _chat_panel.get_viewport().get_visible_rect().size.x
+	if editor_w <= 1.0:
+		if attempt < 5:
+			call_deferred("_apply_preferred_dock_width", attempt + 1)
+		return
+	var target := maxi(DOCK_WIDTH_FLOOR_PX, int(round(editor_w * DOCK_WIDTH_RATIO)))
+	if _try_set_split_dock_width(_chat_panel, target):
+		return
+	if attempt < 5:
+		# Split sizes often settle a frame or two after add_control_to_dock.
+		call_deferred("_apply_preferred_dock_width", attempt + 1)
+		return
+	_chat_panel.custom_minimum_size.x = float(target)
+
+func _try_set_split_dock_width(control: Control, target_px: int) -> bool:
+	var node: Node = control.get_parent()
+	while node:
+		if node is SplitContainer:
+			var split := node as SplitContainer
+			# Left/right split only (vertical == false in Godot 4).
+			if split.is_vertical():
+				node = node.get_parent()
+				continue
+			var total := split.size.x
+			if total <= 1.0:
+				node = node.get_parent()
+				continue
+			# Right-side dock: keep `target_px` on the trailing side of the split.
+			var child_count := split.get_child_count()
+			var dock_is_trailing := false
+			var walk: Node = control
+			while walk and walk != split:
+				if walk.get_parent() == split:
+					dock_is_trailing = walk.get_index() == child_count - 1
+					break
+				walk = walk.get_parent()
+			if dock_is_trailing:
+				split.split_offset = int(total - target_px)
+			else:
+				split.split_offset = target_px
+			return true
+		node = node.get_parent()
+	return false
 
 func _cache_shortcuts() -> void:
 	_parsed_focus_chat = AISettings.parse_shortcut(_settings.shortcut_focus_chat)
