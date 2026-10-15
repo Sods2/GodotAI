@@ -148,6 +148,8 @@ func _build_ui() -> void:
 	_scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll_container.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll_container.clip_contents = true
+	# Prefer text drag-select over accidental vertical scroll on short drags.
+	_scroll_container.scroll_deadzone = 32
 	vbox.add_child(_scroll_container)
 
 	_message_list = VBoxContainer.new()
