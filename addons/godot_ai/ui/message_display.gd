@@ -25,6 +25,7 @@ func _ready() -> void:
 	# Do not clip — that cut user bubbles mid-word after the narrow-dock pass.
 	clip_contents = false
 	custom_minimum_size.x = 0
+	mouse_filter = Control.MOUSE_FILTER_PASS
 	add_theme_constant_override("separation", 4)
 
 ## Factory: create and populate a styled user message bubble.
@@ -101,6 +102,8 @@ func _build_user_message(text: String) -> void:
 	panel.add_theme_stylebox_override("panel", style)
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.clip_contents = false
+	# Let drag events reach the RichTextLabel for selection.
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(panel)
 
 	var label := _make_rich_label()
@@ -180,6 +183,9 @@ func _make_rich_label() -> RichTextLabel:
 	# Default RichTextLabel is not selectable — only code blocks (TextEdit) were copyable.
 	label.selection_enabled = true
 	label.context_menu_enabled = true
+	label.shortcut_keys_enabled = true
+	label.focus_mode = Control.FOCUS_CLICK
+	label.mouse_filter = Control.MOUSE_FILTER_STOP
 	label.add_theme_font_size_override("normal_font_size", _font_size)
 	label.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
 	return label

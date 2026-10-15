@@ -22,6 +22,7 @@ var _messages: Array = []  # Array of {role, content}
 var _current_assistant_display: MessageDisplay = null
 var _is_waiting: bool = false
 var _stream_gen: int = 0  # bumped on cancel/clear so late provider signals are ignored
+var _accept_gen: int = -1  # generation id currently allowed to update the UI
 var _hints_sent: bool = false  # GDScript hints included only on first message per conversation
 var _welcome_label: Label = null
 
@@ -332,6 +333,7 @@ func _send_message(user_text: String) -> void:
 	_start_thinking_indicator()
 
 	_stream_gen += 1
+	_accept_gen = _stream_gen
 	_set_waiting(true)
 	_scroll_to_bottom()
 
@@ -343,7 +345,7 @@ func _send_message(user_text: String) -> void:
 ## Lazily create the assistant placeholder on the first token so that empty
 ## responses (e.g. immediate errors) leave no orphan bubble in the UI.
 func _on_token(token: String) -> void:
-	if not _is_waiting:
+	if not _is_waiting or _accept_gen != _stream_gen:
 		return
 	if _current_assistant_display == null:
 		# First token: stop thinking indicator and create assistant placeholder
@@ -357,7 +359,7 @@ func _on_token(token: String) -> void:
 ## Finalize streaming: re-render through MarkdownParser, append to history,
 ## persist to disk, and re-enable the input field.
 func _on_completed(full_text: String) -> void:
-	if not _is_waiting:
+	if not _is_waiting or _accept_gen != _stream_gen:
 		return
 	_stop_thinking_indicator()
 	if _current_assistant_display:
@@ -372,7 +374,7 @@ func _on_completed(full_text: String) -> void:
 ## Handle provider errors. Rolls back the user message from history if the
 ## provider never responded, so the next send starts from a clean state.
 func _on_error(error: String) -> void:
-	if not _is_waiting:
+	if not _is_waiting or _accept_gen != _stream_gen:
 		return
 	_stop_thinking_indicator()
 	if _current_assistant_display:
@@ -395,13 +397,8 @@ func _on_error(error: String) -> void:
 ## Stop the active stream and roll back any partial state: finishes the
 ## assistant bubble (if any) and removes the unanswered user message.
 func _on_cancel_pressed() -> void:
-	_stream_gen += 1
-	_stop_thinking_indicator()
-	if _provider_manager:
-		_provider_manager.cancel()
-	# Drop the partial assistant bubble (and its wrapper) instead of finishing it —
-	# keeping a half-stream next to a rolled-back user message is confusing, and
-	# finish_streaming()+queue_free races with a following Clear.
+	_abort_active_stream()
+	# Drop the partial assistant bubble (and its wrapper) instead of finishing it.
 	if _current_assistant_display and is_instance_valid(_current_assistant_display):
 		var wrapper := _current_assistant_display.get_parent()
 		if wrapper:
@@ -413,23 +410,28 @@ func _on_cancel_pressed() -> void:
 	# Remove the pending user message so the next send starts from a clean state
 	if not _messages.is_empty() and _messages.back().get("role") == "user":
 		_messages.pop_back()
-		# Also remove the last user bubble from the UI if present
 		_remove_last_user_bubble()
-	_set_waiting(false)
 	_scroll_to_bottom()
 
 func _on_clear_pressed() -> void:
-	_stream_gen += 1
-	_stop_thinking_indicator()
-	if _provider_manager and _is_waiting:
-		_provider_manager.cancel()
+	# Invalidate + stop waiting BEFORE cancel so late tokens cannot recreate UI.
+	_abort_active_stream()
 	_current_assistant_display = null
 	_messages.clear()
-	_set_waiting(false)
 	_clear_message_widgets()
 	_hints_sent = false
 	_set_status("")
 	_delete_history()
+
+## Stop accepting stream UI updates, flip out of waiting, and cancel the provider.
+## Order matters: bump gen + clear waiting first so in-flight signals are ignored.
+func _abort_active_stream() -> void:
+	_stream_gen += 1
+	_accept_gen = -1
+	_set_waiting(false)
+	_stop_thinking_indicator()
+	if _provider_manager:
+		_provider_manager.cancel()
 
 ## Immediately free every message-list child so a following Clear cannot race
 ## with deferred queue_free from finish_streaming / cancel.

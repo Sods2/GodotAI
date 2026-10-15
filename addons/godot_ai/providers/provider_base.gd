@@ -25,6 +25,7 @@ var _parent_node: Node = null
 var _http_stream: HTTPStream = null
 var _sse_client := SSEClient.new()
 var _stream_completed := false
+var _cancelled := false
 
 var _cached_models: Array[String] = []
 var _custom_models: Array[String] = []
@@ -50,6 +51,7 @@ func send_message(messages: Array, system_prompt: String = "") -> void:
 		response_error.emit("%s API key not set. Open Settings to add your key." % get_provider_name())
 		return
 
+	_cancelled = false
 	_sse_client.reset()
 	_stream_completed = false
 
@@ -60,8 +62,11 @@ func send_message(messages: Array, system_prompt: String = "") -> void:
 	_setup_stream()
 	_http_stream.send_request(get_api_host(), get_api_path(), headers, body_json, get_api_port(), get_api_use_ssl())
 
-## Cancel an in-progress request.
+## Cancel an in-progress request and ignore any late chunks/tokens.
 func cancel() -> void:
+	_cancelled = true
+	_stream_completed = true
+	_sse_client.reset()
 	if _http_stream and is_instance_valid(_http_stream):
 		_http_stream.cancel()
 
@@ -200,18 +205,26 @@ func _setup_stream() -> void:
 	_http_stream.request_cancelled.connect(_on_http_cancelled)
 
 func _on_chunk(text: String) -> void:
+	if _cancelled:
+		return
 	_sse_client.push_chunk(text)
 
 func _on_token(text: String) -> void:
+	if _cancelled:
+		return
 	response_token.emit(text)
 
 func _on_stream_completed(full_text: String) -> void:
+	if _cancelled:
+		return
 	_stream_completed = true
 	if _http_stream and is_instance_valid(_http_stream):
 		_http_stream.finish()
 	response_completed.emit(full_text)
 
 func _on_http_done() -> void:
+	if _cancelled:
+		return
 	# Process any final incomplete SSE line that arrived without a trailing newline.
 	_sse_client.flush()
 	if _stream_completed:
@@ -224,15 +237,20 @@ func _on_http_done() -> void:
 		response_error.emit("Connection closed unexpectedly")
 
 func _on_http_cancelled() -> void:
+	_cancelled = true
 	_stream_completed = true  # prevent _on_http_done from firing after cancel
 
 func _on_stream_error(message: String) -> void:
+	if _cancelled:
+		return
 	_stream_completed = true  # the error ends this response; ignore the socket closing after it
 	if _http_stream and is_instance_valid(_http_stream):
 		_http_stream.finish()
 	response_error.emit(message)
 
 func _on_http_error(error: String) -> void:
+	if _cancelled:
+		return
 	if _stream_completed:
 		return  # response already delivered; a late socket error is not a failure
 	response_error.emit("Network error: " + error)
